@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Escáner PDF">
+  <meta name="description" content="Escanea documentos y convierte imágenes en PDF de alta calidad, directamente en tu iPhone.">
+  <title>Escáner PDF</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+
+  <!-- Biblioteca -->
+  <section id="library" class="screen">
+    <header class="bar">
+      <span></span>
+      <h1>Mis PDF</h1>
+      <button id="importPdfBtn" class="icon-btn" data-icon="docImport" aria-label="Importar PDF"></button>
+    </header>
+    <div class="scroll">
+      <input id="search" class="search" type="search" placeholder="Buscar PDF" autocomplete="off">
+      <ul id="docList" class="doc-list"></ul>
+      <div id="emptyState" class="empty" hidden>
+        <div class="empty-icon" data-icon="scan"></div>
+        <h2>Aún no hay PDF</h2>
+        <p>Escanea un documento con la cámara o convierte imágenes de tu galería en un PDF de alta calidad.</p>
+      </div>
+    </div>
+    <footer class="bottom-actions">
+      <button id="scanBtn" class="btn primary"><span data-icon="camera"></span>Escanear</button>
+      <button id="imagesBtn" class="btn"><span data-icon="photo"></span>Imágenes</button>
+    </footer>
+  </section>
+
+  <!-- Nuevo PDF -->
+  <section id="editor" class="screen" hidden>
+    <header class="bar">
+      <button id="editorCancel" class="text-btn">Cancelar</button>
+      <h1>Nuevo PDF</h1>
+      <button id="editorCreate" class="text-btn strong">Crear</button>
+    </header>
+    <div class="scroll">
+      <p class="section-title">Nombre</p>
+      <div class="group">
+        <input id="docName" class="row-input" type="text" autocomplete="off" enterkeyhint="done">
+      </div>
+
+      <p class="section-title">Páginas <span id="pageCount"></span></p>
+      <div id="pageGrid" class="page-grid"></div>
+      <p id="pagesHint" class="hint"></p>
+      <div class="add-row">
+        <button id="addCameraBtn" class="btn"><span data-icon="camera"></span>Cámara</button>
+        <button id="addImagesBtn" class="btn"><span data-icon="photo"></span>Fotos / Archivos</button>
+      </div>
+
+      <p class="section-title">Calidad del PDF</p>
+      <div class="group">
+        <label class="row"><span>Tamaño de página</span><select id="pageSize"></select></label>
+        <label class="row"><span>Calidad</span><select id="quality"></select></label>
+        <label class="row"><span>Márgenes blancos</span><input id="margins" type="checkbox" class="switch"></label>
+        <label class="row"><span>Filtro para todas</span><select id="filterAll"></select></label>
+      </div>
+      <p id="qualityHint" class="hint"></p>
+    </div>
+  </section>
+
+  <!-- Editor de página -->
+  <section id="pageEditor" class="screen dark" hidden>
+    <header class="bar">
+      <button id="peCancel" class="text-btn">Cancelar</button>
+      <h1 id="peTitle">Página</h1>
+      <button id="peDone" class="text-btn strong">Listo</button>
+    </header>
+    <div class="segmented" id="peTabs">
+      <button data-tab="crop">Bordes</button>
+      <button data-tab="result">Resultado</button>
+    </div>
+    <div id="peStage" class="stage">
+      <div id="cropBox" class="crop-box">
+        <img id="cropImg" alt="">
+        <svg id="cropSvg"></svg>
+      </div>
+      <img id="previewImg" class="preview" alt="Vista previa de la página" hidden>
+      <div id="peSpinner" class="spinner" hidden></div>
+    </div>
+    <div id="loupe" class="loupe" hidden></div>
+    <div id="cropControls" class="controls">
+      <button id="autoBtn" class="chip"><span data-icon="sparkle"></span>Detectar bordes</button>
+      <button id="fullBtn" class="chip"><span data-icon="expand"></span>Imagen completa</button>
+    </div>
+    <div id="filterControls" class="controls" hidden>
+      <div id="filterSeg" class="segmented small"></div>
+    </div>
+    <footer class="pe-footer">
+      <button id="peDelete" class="icon-btn" data-icon="trash" aria-label="Eliminar página"></button>
+      <button id="peRotL" class="icon-btn" data-icon="rotateLeft" aria-label="Girar a la izquierda"></button>
+      <button id="peRotR" class="icon-btn" data-icon="rotateRight" aria-label="Girar a la derecha"></button>
+      <button id="peMoveL" class="icon-btn" data-icon="chevronLeft" aria-label="Mover antes"></button>
+      <button id="peMoveR" class="icon-btn" data-icon="chevronRight" aria-label="Mover después"></button>
+    </footer>
+    <div id="peNextWrap" class="pe-next">
+      <button id="peNext" class="btn primary"><span data-icon="camera"></span>Listo y escanear otra</button>
+    </div>
+  </section>
+
+  <!-- Visor -->
+  <section id="viewer" class="screen" hidden>
+    <header class="bar">
+      <button id="viewerBack" class="text-btn back"><span data-icon="chevronLeft"></span>Mis PDF</button>
+      <h1 id="viewerTitle"></h1>
+      <button id="viewerRename" class="icon-btn" data-icon="pencil" aria-label="Renombrar"></button>
+    </header>
+    <div id="viewerPages" class="scroll viewer-pages"></div>
+    <footer class="bottom-actions">
+      <button id="shareBtn" class="btn primary"><span data-icon="share"></span>Compartir / Guardar</button>
+      <button id="downloadBtn" class="icon-btn boxed" data-icon="download" aria-label="Descargar"></button>
+      <button id="deleteBtn" class="icon-btn boxed danger" data-icon="trash" aria-label="Eliminar"></button>
+    </footer>
+  </section>
+
+  <div id="busy" class="busy" hidden>
+    <div class="busy-card"><div class="spinner"></div><p id="busyText"></p></div>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <input id="cameraInput" class="file-input" type="file" accept="image/*" capture="environment">
+  <input id="imagesInput" class="file-input" type="file" accept="image/*" multiple>
+  <input id="pdfInput" class="file-input" type="file" accept="application/pdf,.pdf" multiple>
+</body>
+</html>
