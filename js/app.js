@@ -343,7 +343,7 @@ function renderEditor() {
   el.pageCount.textContent = pages.length ? `(${pages.length})` : '';
   el.pagesHint.textContent = pages.length
     ? 'Toca una página para ajustar bordes, filtro, giro u orden.'
-    : 'Todavía no hay páginas. Escanea con la cámara o añade imágenes.';
+    : 'Todavía no hay páginas. Escanea con la cámara o agrega imágenes.';
   el.editorCreate.disabled = pages.length === 0;
 }
 
@@ -482,7 +482,7 @@ async function createPdf() {
     releaseDraft();
     renderLibrary();
     openViewer(doc);
-    toast('PDF creado. Pulsa «Compartir / Guardar» para enviarlo a otra app.');
+    toast('PDF creado. Toca «Compartir / Guardar» para enviarlo a otra app.');
   } catch (error) {
     toast(`No se pudo crear el PDF: ${error.message}`);
   } finally {
