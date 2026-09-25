@@ -36,6 +36,8 @@ const ICONS = {
   docImport: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M12 11v6M9 14l3 3 3-3"/>',
   sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 16l.7 1.8 1.8.7-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z"/>',
   expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  cloud: '<path d="M7 18h10.5a4.5 4.5 0 0 0 .6-8.96A6 6 0 0 0 6.34 10.1 4 4 0 0 0 7 18z"/>',
 };
 
 const icon = (name) =>
@@ -866,8 +868,112 @@ function setup() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Cuenta (Supabase)
+// Se carga aparte: si falla (por ejemplo, sin conexión la primera vez), el
+// escaneo y la biblioteca local siguen funcionando igual.
+// ---------------------------------------------------------------------------
+
+async function setupAccount() {
+  const ids = [
+    'account', 'accountBtn', 'accountClose', 'authForm', 'authModes', 'authEmail', 'authPassword',
+    'authPassword2', 'authHint', 'authError', 'authSubmit', 'accountInfo', 'accountEmail', 'signOutBtn',
+  ];
+  const ui = Object.fromEntries(ids.map((id) => [id, $(id)]));
+  let mode = 'signin';
+
+  const showError = (message) => {
+    ui.authError.textContent = message;
+    ui.authError.hidden = !message;
+  };
+
+  const setMode = (next) => {
+    mode = next;
+    for (const button of ui.authModes.children) button.classList.toggle('active', button.dataset.mode === mode);
+    const signup = mode === 'signup';
+    ui.authPassword2.hidden = !signup;
+    ui.authPassword.autocomplete = signup ? 'new-password' : 'current-password';
+    ui.authSubmit.textContent = signup ? 'Crear cuenta' : 'Entrar';
+    ui.authHint.textContent = signup ? 'La contraseña debe tener al menos 8 caracteres.' : '';
+    showError('');
+  };
+
+  ui.accountBtn.addEventListener('click', () => {
+    showError('');
+    ui.account.hidden = false;
+  });
+  ui.accountClose.addEventListener('click', () => (ui.account.hidden = true));
+  ui.authModes.addEventListener('click', (event) => {
+    const next = event.target.closest('button')?.dataset.mode;
+    if (next) setMode(next);
+  });
+
+  let auth;
+  try {
+    auth = await import('./auth.js');
+  } catch {
+    ui.accountBtn.addEventListener('click', () => showError('No se pudo cargar la cuenta. Revisa tu conexión y vuelve a abrir la app.'));
+    return;
+  }
+
+  auth.onUserChange((user) => {
+    ui.accountBtn.classList.toggle('signed-in', Boolean(user));
+    ui.accountBtn.setAttribute('aria-label', user ? `Cuenta: ${user.email}` : 'Cuenta (sin iniciar sesión)');
+    ui.authForm.hidden = Boolean(user);
+    ui.accountInfo.hidden = !user;
+    ui.accountEmail.textContent = user?.email ?? '';
+  });
+
+  ui.authForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const email = ui.authEmail.value.trim();
+    const password = ui.authPassword.value;
+    if (!email || !password) return showError('Escribe tu correo y tu contraseña.');
+    if (mode === 'signup') {
+      if (password.length < 8) return showError('La contraseña debe tener al menos 8 caracteres.');
+      if (password !== ui.authPassword2.value) return showError('Las contraseñas no coinciden.');
+    }
+    showError('');
+    ui.authSubmit.disabled = true;
+    busy(mode === 'signup' ? 'Creando cuenta…' : 'Entrando…');
+    try {
+      if (mode === 'signup') {
+        const ready = await auth.signUp(email, password);
+        if (!ready) {
+          showError('Cuenta creada. Revisa tu correo para confirmarla y luego usa «Entrar».');
+          setMode('signin');
+          return;
+        }
+      } else {
+        await auth.signIn(email, password);
+      }
+      ui.authPassword.value = '';
+      ui.authPassword2.value = '';
+      ui.account.hidden = true;
+      toast(mode === 'signup' ? 'Cuenta creada. Sesión iniciada.' : 'Sesión iniciada');
+      setMode('signin');
+    } catch (error) {
+      showError(error.message);
+    } finally {
+      busy(null);
+      ui.authSubmit.disabled = false;
+    }
+  });
+
+  ui.signOutBtn.addEventListener('click', async () => {
+    if (!confirm('¿Cerrar la sesión en este iPhone?')) return;
+    try {
+      await auth.signOut();
+      toast('Sesión cerrada');
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+}
+
 async function start() {
   setup();
+  setupAccount();
   try {
     state.docs = await listDocs();
   } catch (error) {

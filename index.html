@@ -15,6 +15,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
+  <script defer src="js/vendor/supabase.js"></script>
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
@@ -22,7 +23,7 @@
   <!-- Biblioteca -->
   <section id="library" class="screen">
     <header class="bar">
-      <span></span>
+      <button id="accountBtn" class="icon-btn account-btn" data-icon="user" aria-label="Cuenta"></button>
       <h1>Mis PDF</h1>
       <button id="importPdfBtn" class="icon-btn" data-icon="docImport" aria-label="Importar PDF"></button>
     </header>
@@ -125,6 +126,41 @@
       <button id="downloadBtn" class="icon-btn boxed" data-icon="download" aria-label="Descargar"></button>
       <button id="deleteBtn" class="icon-btn boxed danger" data-icon="trash" aria-label="Eliminar"></button>
     </footer>
+  </section>
+
+  <!-- Cuenta -->
+  <section id="account" class="screen sheet" hidden>
+    <header class="bar">
+      <button id="accountClose" class="text-btn">Cerrar</button>
+      <h1>Cuenta</h1>
+      <span></span>
+    </header>
+    <div class="scroll">
+      <form id="authForm" class="auth-form" novalidate>
+        <div class="empty-icon" data-icon="cloud"></div>
+        <p class="auth-intro">Inicia sesión para guardar tus PDF en la nube y verlos desde cualquier dispositivo.</p>
+        <div id="authModes" class="segmented light">
+          <button type="button" data-mode="signin" class="active">Entrar</button>
+          <button type="button" data-mode="signup">Crear cuenta</button>
+        </div>
+        <div class="group">
+          <input id="authEmail" class="row-input" type="email" placeholder="Correo" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+          <input id="authPassword" class="row-input" type="password" placeholder="Contraseña" autocomplete="current-password" required>
+          <input id="authPassword2" class="row-input" type="password" placeholder="Repite la contraseña" autocomplete="new-password" hidden>
+        </div>
+        <p id="authHint" class="hint"></p>
+        <p id="authError" class="auth-error" role="alert" hidden></p>
+        <button id="authSubmit" class="btn primary auth-submit" type="submit">Entrar</button>
+      </form>
+
+      <div id="accountInfo" class="auth-form" hidden>
+        <div class="empty-icon" data-icon="cloud"></div>
+        <p class="auth-intro">Sesión iniciada como</p>
+        <p id="accountEmail" class="account-email"></p>
+        <p class="hint center">La sesión queda abierta en este iPhone. El guardado en la nube se activa en la próxima actualización.</p>
+        <button id="signOutBtn" class="btn auth-submit danger-text">Cerrar sesión</button>
+      </div>
+    </div>
   </section>
 
   <div id="busy" class="busy" hidden>

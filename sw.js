@@ -1,6 +1,6 @@
 // Service worker: guarda la app en caché para que funcione sin conexión.
 // Sube VERSION cada vez que publiques cambios.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = `escaner-pdf-${VERSION}`;
 const ASSETS = [
   './',
@@ -8,6 +8,9 @@ const ASSETS = [
   'styles.css',
   'manifest.webmanifest',
   'js/app.js',
+  'js/auth.js',
+  'js/config.js',
+  'js/vendor/supabase.js',
   'js/db.js',
   'js/imaging.js',
   'js/pdf.js',

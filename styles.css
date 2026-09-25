@@ -12,6 +12,7 @@
   --bar: rgba(242, 242, 247, 0.86);
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   --radius: 12px;
+  --segment-active: #ffffff;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   color-scheme: light dark;
@@ -31,6 +32,7 @@
     --danger: #ff453a;
     --bar: rgba(10, 10, 10, 0.86);
     --shadow: none;
+    --segment-active: #636366;
   }
 }
 
@@ -266,3 +268,30 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 }
 
 .file-input { position: fixed; top: -100px; left: 0; width: 1px; height: 1px; opacity: 0; }
+
+/* ---------- Cuenta ---------- */
+
+.screen.sheet { z-index: 6; }
+.account-btn { position: relative; }
+.account-btn.signed-in::after {
+  content: "";
+  position: absolute;
+  right: 9px;
+  bottom: 10px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #34c759;
+  border: 2px solid var(--bg);
+}
+.auth-form { display: flex; flex-direction: column; align-items: stretch; gap: 14px; max-width: 420px; margin: 3vh auto 0; }
+.auth-form .empty-icon { align-self: center; }
+.auth-intro { margin: 0; text-align: center; color: var(--text-2); }
+.segmented.light { margin: 0; }
+.segmented.light button.active { background: var(--segment-active); color: var(--text); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); }
+.row-input + .row-input { border-top: 0.5px solid var(--separator); }
+.auth-error { margin: 0; padding: 10px 14px; border-radius: 10px; background: rgba(229, 51, 42, 0.12); color: var(--danger); font-size: 15px; }
+.auth-submit { width: 100%; }
+.account-email { margin: -8px 0 0; text-align: center; font-size: 19px; font-weight: 600; word-break: break-all; }
+.hint.center { text-align: center; }
+.danger-text { color: var(--danger); }
