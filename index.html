@@ -24,16 +24,22 @@
   <section id="library" class="screen">
     <header class="bar">
       <button id="accountBtn" class="icon-btn account-btn" data-icon="user" aria-label="Cuenta"></button>
-      <h1>Mis PDF</h1>
-      <button id="importPdfBtn" class="icon-btn" data-icon="docImport" aria-label="Importar PDF"></button>
+      <h1 id="libraryTitle">Mis PDF</h1>
+      <button id="importPdfBtn" class="icon-btn" data-icon="plusCircle" aria-label="Agregar"></button>
     </header>
     <div class="scroll">
       <input id="search" class="search" type="search" placeholder="Buscar PDF" autocomplete="off">
+      <nav id="crumbs" class="crumbs" aria-label="Ubicación" hidden></nav>
+      <div id="uploadBanner" class="banner" hidden>
+        <span id="uploadBannerText"></span>
+        <button id="uploadBannerBtn" class="text-btn strong">Subir</button>
+      </div>
+      <ul id="folderList" class="doc-list"></ul>
       <ul id="docList" class="doc-list"></ul>
       <div id="emptyState" class="empty" hidden>
         <div class="empty-icon" data-icon="scan"></div>
-        <h2>Aún no hay PDF</h2>
-        <p>Escanea un documento con la cámara o convierte imágenes de tu galería en un PDF de alta calidad.</p>
+        <h2 id="emptyTitle">Aún no hay PDF</h2>
+        <p id="emptyText">Escanea un documento con la cámara o convierte imágenes de tu galería en un PDF de alta calidad.</p>
       </div>
     </div>
     <footer class="bottom-actions">
@@ -54,6 +60,7 @@
       <div class="group">
         <input id="docName" class="row-input" type="text" autocomplete="off" enterkeyhint="done">
       </div>
+      <p id="destHint" class="hint"></p>
 
       <p class="section-title">Páginas <span id="pageCount"></span></p>
       <div id="pageGrid" class="page-grid"></div>
@@ -123,6 +130,7 @@
     <div id="viewerPages" class="scroll viewer-pages"></div>
     <footer class="bottom-actions">
       <button id="shareBtn" class="btn primary"><span data-icon="share"></span>Compartir / Guardar</button>
+      <button id="moveBtn" class="icon-btn boxed" data-icon="folder" aria-label="Mover a otra carpeta" hidden></button>
       <button id="downloadBtn" class="icon-btn boxed" data-icon="download" aria-label="Descargar"></button>
       <button id="deleteBtn" class="icon-btn boxed danger" data-icon="trash" aria-label="Eliminar"></button>
     </footer>
@@ -157,7 +165,7 @@
         <div class="empty-icon" data-icon="cloud"></div>
         <p class="auth-intro">Sesión iniciada como</p>
         <p id="accountEmail" class="account-email"></p>
-        <p class="hint center">La sesión queda abierta en este iPhone. El guardado en la nube se activa en la próxima actualización.</p>
+        <p class="hint center">La sesión queda abierta en este iPhone. Tus PDF nuevos se guardan también en la nube.</p>
         <button id="signOutBtn" class="btn auth-submit danger-text">Cerrar sesión</button>
       </div>
     </div>

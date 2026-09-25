@@ -38,6 +38,9 @@ const ICONS = {
   expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   cloud: '<path d="M7 18h10.5a4.5 4.5 0 0 0 .6-8.96A6 6 0 0 0 6.34 10.1 4 4 0 0 0 7 18z"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  plusCircle: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
 };
 
 const icon = (name) =>
@@ -46,8 +49,9 @@ const icon = (name) =>
 const $ = (id) => document.getElementById(id);
 const el = {};
 for (const id of [
-  'library', 'search', 'docList', 'emptyState', 'scanBtn', 'imagesBtn', 'importPdfBtn',
-  'editor', 'editorCancel', 'editorCreate', 'docName', 'pageCount', 'pageGrid', 'pagesHint',
+  'library', 'libraryTitle', 'search', 'crumbs', 'uploadBanner', 'uploadBannerText', 'uploadBannerBtn',
+  'folderList', 'docList', 'emptyState', 'emptyTitle', 'emptyText', 'scanBtn', 'imagesBtn', 'importPdfBtn',
+  'editor', 'editorCancel', 'editorCreate', 'docName', 'destHint', 'pageCount', 'pageGrid', 'pagesHint', 'moveBtn',
   'addCameraBtn', 'addImagesBtn', 'pageSize', 'quality', 'margins', 'filterAll', 'qualityHint',
   'pageEditor', 'peCancel', 'peDone', 'peTitle', 'peTabs', 'peStage', 'cropBox', 'cropImg', 'cropSvg',
   'previewImg', 'peSpinner', 'loupe', 'cropControls', 'filterControls', 'filterSeg', 'autoBtn', 'fullBtn',
@@ -61,6 +65,9 @@ const state = {
   current: null, // documento abierto en el visor
   draft: null, // { pages: [] } del PDF en edición
   pe: null, // sesión del editor de página
+  user: null, // usuario de Supabase con sesión iniciada
+  folders: [], // carpetas de la nube
+  folderId: null, // carpeta abierta en «Mis PDF» (null = raíz)
 };
 
 const thumbUrls = new Map(); // id de documento → URL de la miniatura
@@ -142,36 +149,403 @@ function thumbUrl(doc) {
   return thumbUrls.get(doc.id);
 }
 
+const SYNC_LABELS = {
+  pendiente: 'Pendiente de subir',
+  subiendo: 'Subiendo…',
+  subido: 'En la nube',
+  error: 'Error al subir: se reintentará',
+};
+
+const signedIn = () => Boolean(state.user && cloud);
+
+/** Documentos visibles: los locales sin dueño y los de la cuenta con sesión iniciada. */
+const visibleDocs = () => state.docs.filter((doc) => !doc.userId || doc.userId === state.user?.id);
+
 function renderLibrary() {
   const query = el.search.value.trim().toLowerCase();
-  const docs = state.docs
-    .filter((doc) => doc.name.toLowerCase().includes(query))
-    .sort((a, b) => b.created - a.created);
+  const inCloud = signedIn();
+  const searching = Boolean(query);
+  const folderId = inCloud ? state.folderId : null;
+  const allDocs = visibleDocs();
 
-  el.docList.replaceChildren(
-    ...docs.map((doc) => {
-      const li = document.createElement('li');
-      const url = thumbUrl(doc);
-      li.innerHTML = `
-        <button class="doc-row">
-          ${url ? `<img class="thumb" alt="" src="${url}">` : `<span class="thumb">${icon('doc')}</span>`}
-          <span class="meta">
-            <span class="name"></span>
-            <span class="sub">${pagesText(doc.pageCount)} · ${formatSize(doc.size)}</span>
-            <span class="date">${dateFormat.format(doc.created)}</span>
-          </span>
-          <span class="icon-btn" role="button" aria-label="Compartir" data-share>${icon('share')}</span>
-        </button>`;
-      li.querySelector('.name').textContent = doc.name;
-      li.querySelector('.doc-row').addEventListener('click', (event) => {
-        if (event.target.closest('[data-share]')) sharePdf(doc);
-        else openViewer(doc);
-      });
-      return li;
+  const docs = allDocs
+    .filter((doc) =>
+      searching ? doc.name.toLowerCase().includes(query) : !inCloud || (doc.carpetaId ?? null) === folderId,
+    )
+    .sort((a, b) => b.created - a.created);
+  const folders =
+    inCloud && !searching
+      ? state.folders
+          .filter((f) => (f.carpeta_padre_id ?? null) === folderId)
+          .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+      : [];
+
+  // Título y ruta de carpetas
+  const path = inCloud ? folderPath(folderId) : [];
+  el.libraryTitle.textContent = path.at(-1)?.nombre ?? 'Mis PDF';
+  el.crumbs.hidden = !path.length || searching;
+  el.crumbs.replaceChildren(
+    ...[{ id: null, nombre: 'Mis PDF' }, ...path].flatMap((folder, i, list) => {
+      const crumb = document.createElement(i === list.length - 1 ? 'span' : 'button');
+      crumb.textContent = folder.nombre;
+      if (crumb.tagName === 'BUTTON') crumb.addEventListener('click', () => openFolder(folder.id));
+      return i ? [Object.assign(document.createElement('span'), { textContent: '›', className: 'sep' }), crumb] : [crumb];
     }),
   );
-  el.emptyState.hidden = state.docs.length > 0;
-  el.search.hidden = state.docs.length === 0;
+
+  // Aviso para subir los PDF que solo están en este iPhone
+  const localOnly = inCloud ? allDocs.filter((doc) => !doc.userId).length : 0;
+  el.uploadBanner.hidden = !localOnly;
+  el.uploadBannerText.textContent =
+    localOnly === 1 ? '1 PDF está solo en este iPhone.' : `${localOnly} PDF están solo en este iPhone.`;
+
+  el.folderList.replaceChildren(...folders.map(folderRow));
+  el.docList.replaceChildren(...docs.map((doc) => docRow(doc, searching && inCloud)));
+
+  const empty = !docs.length && !folders.length;
+  el.emptyState.hidden = !empty;
+  if (searching) {
+    el.emptyTitle.textContent = 'Sin resultados';
+    el.emptyText.textContent = 'No hay PDF con ese nombre.';
+  } else if (folderId) {
+    el.emptyTitle.textContent = 'Carpeta vacía';
+    el.emptyText.textContent = 'Escanea o agrega imágenes estando aquí para guardarlas en esta carpeta.';
+  } else {
+    el.emptyTitle.textContent = 'Aún no hay PDF';
+    el.emptyText.textContent = 'Escanea un documento con la cámara o convierte imágenes de tu galería en un PDF de alta calidad.';
+  }
+  el.search.hidden = !allDocs.length && !state.folders.length;
+}
+
+function docRow(doc, showFolder) {
+  const li = document.createElement('li');
+  const url = thumbUrl(doc);
+  li.innerHTML = `
+    <button class="doc-row">
+      ${url ? `<img class="thumb" alt="" src="${url}">` : `<span class="thumb">${icon('doc')}</span>`}
+      <span class="meta">
+        <span class="name"></span>
+        <span class="sub">${pagesText(doc.pageCount)} · ${formatSize(doc.size)}</span>
+        <span class="date"></span>
+      </span>
+      <span class="icon-btn" role="button" aria-label="Compartir" data-share>${icon('share')}</span>
+    </button>`;
+  li.querySelector('.name').textContent = doc.name;
+  const details = [dateFormat.format(doc.created)];
+  if (showFolder) details.push(folderLabel(doc.carpetaId));
+  if (signedIn() && SYNC_LABELS[doc.sync] && doc.userId) details.push(SYNC_LABELS[doc.sync]);
+  const date = li.querySelector('.date');
+  date.textContent = details.join(' · ');
+  date.classList.toggle('error', doc.sync === 'error');
+  li.querySelector('.doc-row').addEventListener('click', (event) => {
+    if (event.target.closest('[data-share]')) {
+      if (doc.pdf) sharePdf(doc);
+      else openViewer(doc); // hay que descargarlo antes de poder compartirlo
+    } else {
+      openViewer(doc);
+    }
+  });
+  return li;
+}
+
+function folderRow(folder) {
+  const li = document.createElement('li');
+  const docs = visibleDocs().filter((doc) => doc.carpetaId === folder.id).length;
+  const subfolders = state.folders.filter((f) => f.carpeta_padre_id === folder.id).length;
+  const parts = [docs === 1 ? '1 documento' : `${docs} documentos`];
+  if (subfolders) parts.push(subfolders === 1 ? '1 carpeta' : `${subfolders} carpetas`);
+  li.innerHTML = `
+    <button class="doc-row folder-row">
+      <span class="thumb folder-thumb">${icon('folder')}</span>
+      <span class="meta"><span class="name"></span><span class="sub">${parts.join(' · ')}</span></span>
+      <span class="icon-btn" role="button" aria-label="Opciones de la carpeta" data-more>${icon('more')}</span>
+    </button>`;
+  li.querySelector('.name').textContent = folder.nombre;
+  li.querySelector('.doc-row').addEventListener('click', (event) => {
+    if (event.target.closest('[data-more]')) folderMenu(folder);
+    else openFolder(folder.id);
+  });
+  return li;
+}
+
+// ---------------------------------------------------------------------------
+// Carpetas
+// ---------------------------------------------------------------------------
+
+function folderPath(id) {
+  const path = [];
+  let folder = state.folders.find((f) => f.id === id);
+  while (folder) {
+    path.unshift(folder);
+    folder = state.folders.find((f) => f.id === folder.carpeta_padre_id);
+  }
+  return path;
+}
+
+const folderLabel = (id) => ['Mis PDF', ...folderPath(id).map((f) => f.nombre)].join(' › ');
+
+/** Todas las carpetas en orden de árbol, con su profundidad. */
+function folderTree() {
+  const out = [];
+  const walk = (parentId, depth) =>
+    state.folders
+      .filter((f) => (f.carpeta_padre_id ?? null) === parentId)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+      .forEach((folder) => {
+        out.push({ folder, depth });
+        walk(folder.id, depth + 1);
+      });
+  walk(null, 0);
+  return out;
+}
+
+function openFolder(id) {
+  state.folderId = id;
+  el.search.value = '';
+  renderLibrary();
+  el.library.querySelector('.scroll').scrollTop = 0;
+}
+
+async function runCloud(message, action) {
+  busy(message);
+  try {
+    await action();
+    await syncFromCloud();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(null);
+  }
+}
+
+function newFolder() {
+  const nombre = prompt(`Nombre de la carpeta nueva en «${folderLabel(state.folderId)}»`)?.trim();
+  if (!nombre) return;
+  runCloud('Creando carpeta…', () => cloud.createFolder(nombre, state.folderId));
+}
+
+function folderMenu(folder) {
+  chooseAction(folder.nombre, [
+    {
+      label: 'Renombrar',
+      run: () => {
+        const nombre = prompt('Nuevo nombre de la carpeta', folder.nombre)?.trim();
+        if (nombre && nombre !== folder.nombre) runCloud('Renombrando…', () => cloud.renameFolder(folder.id, nombre));
+      },
+    },
+    {
+      label: 'Eliminar carpeta',
+      danger: true,
+      run: () => {
+        const ok = confirm(
+          `¿Eliminar la carpeta «${folder.nombre}» y sus subcarpetas?\n\n` +
+            'Los documentos que contienen NO se borran: pasan a «Mis PDF».',
+        );
+        if (ok) runCloud('Eliminando carpeta…', () => cloud.deleteFolder(folder.id));
+      },
+    },
+  ]);
+}
+
+/**
+ * Menú de opciones que sube desde abajo. Cada acción se ejecuta dentro del
+ * mismo toque, así iOS permite abrir selectores de archivos desde ella.
+ */
+function chooseAction(title, options) {
+  const sheet = document.createElement('div');
+  sheet.className = 'action-sheet';
+  sheet.innerHTML = '<div class="action-card"><p class="action-title"></p><div class="action-list"></div></div>';
+  sheet.querySelector('.action-title').textContent = title;
+  const close = () => sheet.remove();
+  for (const option of options) {
+    const button = document.createElement('button');
+    button.className = `action-item${option.danger ? ' danger' : ''}${option.current ? ' current' : ''}`;
+    button.textContent = option.label;
+    if (option.depth) button.style.paddingLeft = `${16 + option.depth * 18}px`;
+    button.disabled = Boolean(option.current);
+    button.addEventListener('click', () => {
+      close();
+      option.run();
+    });
+    sheet.querySelector('.action-list').append(button);
+  }
+  const cancel = document.createElement('button');
+  cancel.className = 'action-cancel';
+  cancel.textContent = 'Cancelar';
+  cancel.addEventListener('click', close);
+  sheet.append(cancel);
+  sheet.addEventListener('click', (event) => event.target === sheet && close());
+  document.body.append(sheet);
+}
+
+function addMenu() {
+  const options = [];
+  if (signedIn()) options.push({ label: 'Nueva carpeta', run: newFolder });
+  options.push({ label: 'Importar PDF', run: () => el.pdfInput.click() });
+  chooseAction(signedIn() ? `Agregar en «${folderLabel(state.folderId)}»` : 'Agregar', options);
+}
+
+// ---------------------------------------------------------------------------
+// Nube: subida en cola y sincronización con Supabase
+// ---------------------------------------------------------------------------
+
+let cloud = null; // módulo js/cloud.js; se carga junto con la cuenta
+let docsLoaded = Promise.resolve();
+
+/** Aplica cambios a un documento local y los guarda en el iPhone. */
+async function updateDoc(id, changes) {
+  const index = state.docs.findIndex((doc) => doc.id === id);
+  if (index < 0) return null;
+  const updated = { ...state.docs[index], ...changes };
+  state.docs[index] = updated;
+  if (state.current?.id === id) state.current = updated;
+  if ('thumb' in changes && thumbUrls.has(id)) {
+    URL.revokeObjectURL(thumbUrls.get(id));
+    thumbUrls.delete(id);
+  }
+  await saveDoc(updated);
+  return updated;
+}
+
+async function removeLocalDoc(id) {
+  await deleteDoc(id);
+  state.docs = state.docs.filter((doc) => doc.id !== id);
+  if (thumbUrls.has(id)) URL.revokeObjectURL(thumbUrls.get(id));
+  thumbUrls.delete(id);
+  if (state.current?.id === id) {
+    closeViewerImages();
+    state.current = null;
+    if (!el.viewer.hidden) show('library');
+  }
+}
+
+/** Dueño, estado y carpeta de un documento nuevo, según haya sesión iniciada o no. */
+function newDocOwnership() {
+  return signedIn()
+    ? { userId: state.user.id, sync: 'pendiente', carpetaId: state.folderId }
+    : { sync: 'local', carpetaId: null };
+}
+
+let syncing = null;
+/** Trae carpetas y documentos de la nube y los combina con los del iPhone. */
+function syncFromCloud() {
+  if (!signedIn() || !navigator.onLine) return Promise.resolve();
+  syncing ??= (async () => {
+    try {
+      await docsLoaded;
+      const user = state.user;
+      const [folders, remote] = await Promise.all([cloud.fetchFolders(), cloud.fetchDocuments()]);
+      if (state.user?.id !== user.id) return;
+      state.folders = folders;
+      if (state.folderId && !folders.some((f) => f.id === state.folderId)) state.folderId = null;
+
+      const seen = new Set();
+      for (const row of remote) {
+        seen.add(row.id);
+        const fields = {
+          name: row.nombre,
+          carpetaId: row.carpeta_id,
+          origen: row.origen,
+          estadoOcr: row.estado_ocr,
+          pageCount: row.paginas ?? 0,
+          size: row.version?.tamano_bytes ?? 0,
+          remotePath: row.version?.storage_path ?? null,
+          thumbPath: row.miniatura_path,
+          created: Date.parse(row.created_at),
+          userId: user.id,
+          sync: 'subido',
+        };
+        const local = state.docs.find((doc) => doc.id === row.id);
+        if (!local) {
+          const doc = { id: row.id, pdf: null, thumb: null, previews: null, ...fields };
+          state.docs.push(doc);
+          await saveDoc(doc);
+        } else if (local.sync !== 'subiendo' && Object.keys(fields).some((key) => local[key] !== fields[key])) {
+          // Si cambió la versión (fase 5), la copia local del PDF deja de servir.
+          const stale = local.remotePath && fields.remotePath !== local.remotePath ? { pdf: null, previews: null } : {};
+          await updateDoc(row.id, { ...fields, ...stale });
+        }
+      }
+      // Documentos borrados desde otro dispositivo
+      for (const doc of [...state.docs]) {
+        if (doc.userId === user.id && doc.sync === 'subido' && !seen.has(doc.id)) await removeLocalDoc(doc.id);
+      }
+      renderLibrary();
+      downloadMissingThumbs();
+    } catch (error) {
+      console.warn('Sincronización pendiente:', error.message);
+    } finally {
+      syncing = null;
+    }
+  })();
+  return syncing;
+}
+
+let downloadingThumbs = false;
+async function downloadMissingThumbs() {
+  if (downloadingThumbs) return;
+  downloadingThumbs = true;
+  try {
+    for (const doc of visibleDocs().filter((d) => d.thumbPath && !d.thumb)) {
+      if (!signedIn() || !navigator.onLine) break;
+      try {
+        await updateDoc(doc.id, { thumb: await cloud.downloadFile(doc.thumbPath) });
+        renderLibrary();
+      } catch {
+        /* se reintenta en la próxima sincronización */
+      }
+    }
+  } finally {
+    downloadingThumbs = false;
+  }
+}
+
+let uploading = false;
+/** Sube, de a uno, los PDF pendientes. Sin conexión se detiene y reintenta después. */
+async function processQueue() {
+  if (uploading || !signedIn() || !navigator.onLine) return;
+  uploading = true;
+  try {
+    await docsLoaded;
+    const user = state.user;
+    const queue = state.docs.filter(
+      (doc) => doc.userId === user.id && ['pendiente', 'subiendo', 'error'].includes(doc.sync) && doc.pdf,
+    );
+    for (const { id } of queue) {
+      if (state.user?.id !== user.id) break;
+      const doc = await updateDoc(id, { sync: 'subiendo' });
+      if (!doc) continue;
+      renderLibrary();
+      try {
+        const { remotePath, thumbPath } = await cloud.uploadDocument(doc);
+        await updateDoc(id, { sync: 'subido', remotePath, thumbPath, syncError: null });
+      } catch (error) {
+        await updateDoc(id, { sync: 'error', syncError: error.message });
+        if (!navigator.onLine) break;
+      }
+      renderLibrary();
+    }
+  } finally {
+    uploading = false;
+  }
+}
+
+function syncNow() {
+  syncFromCloud().then(processQueue);
+}
+
+function uploadLocalDocs() {
+  const docs = visibleDocs().filter((doc) => !doc.userId);
+  const ok = confirm(
+    `¿Subir ${docs.length === 1 ? 'el PDF' : `los ${docs.length} PDF`} de este iPhone a tu cuenta (${state.user.email})?\n\n` +
+      'Quedarán en «Mis PDF» y podrás moverlos a carpetas.',
+  );
+  if (!ok) return;
+  Promise.all(docs.map((doc) => updateDoc(doc.id, { userId: state.user.id, sync: 'pendiente', carpetaId: null })))
+    .then(() => {
+      renderLibrary();
+      processQueue();
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -208,9 +582,22 @@ function downloadPdf(doc) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-function openViewer(doc) {
+async function openViewer(doc) {
+  if (!doc.pdf) {
+    // Documento que está solo en la nube: se descarga una vez y queda en el iPhone.
+    if (!signedIn() || !doc.remotePath) return toast('Este PDF está en la nube. Inicia sesión para abrirlo.');
+    busy('Descargando PDF…');
+    try {
+      doc = await updateDoc(doc.id, { pdf: await cloud.downloadFile(doc.remotePath) });
+    } catch (error) {
+      return toast(error.message);
+    } finally {
+      busy(null);
+    }
+  }
   state.current = doc;
   el.viewerTitle.textContent = doc.name;
+  el.moveBtn.hidden = !(signedIn() && doc.userId);
   closeViewerImages();
   if (doc.previews?.length) {
     viewerUrls = doc.previews.map((blob) => URL.createObjectURL(blob));
@@ -224,13 +611,15 @@ function openViewer(doc) {
       }),
     );
   } else {
-    // PDF importado: no tenemos imágenes de las páginas.
+    // PDF importado o descargado de la nube: todavía no hay imágenes de todas las páginas.
     const url = URL.createObjectURL(doc.pdf);
-    viewerUrls = [url];
+    const thumb = doc.thumb ? URL.createObjectURL(doc.thumb) : null;
+    viewerUrls = thumb ? [url, thumb] : [url];
     el.viewerPages.innerHTML = `
       <div class="viewer-note">
+        ${thumb ? `<img class="viewer-thumb" alt="Primera página" src="${thumb}">` : ''}
         <p>${pagesText(doc.pageCount)} · ${formatSize(doc.size)}</p>
-        <p>La vista previa no está disponible para PDF importados.</p>
+        <p>La vista previa de todas las páginas llegará en una próxima actualización.</p>
         <a class="btn" href="${url}" target="_blank" rel="noopener">${icon('doc')}Abrir PDF</a>
       </div>`;
   }
@@ -244,15 +633,22 @@ function closeViewerImages() {
   el.viewerPages.replaceChildren();
 }
 
+const inCloud = (doc) => doc.sync === 'subido';
+
+function waitIfUploading(doc) {
+  if (doc.sync !== 'subiendo') return false;
+  toast('Este PDF se está subiendo. Espera unos segundos y vuelve a intentarlo.');
+  return true;
+}
+
 async function renameCurrent() {
   const doc = state.current;
+  if (waitIfUploading(doc)) return;
   const name = sanitizeName(prompt('Nuevo nombre del PDF', doc.name) ?? '');
   if (!name || name === doc.name) return;
-  const updated = { ...doc, name };
   try {
-    await saveDoc(updated);
-    state.docs = state.docs.map((d) => (d.id === doc.id ? updated : d));
-    state.current = updated;
+    if (inCloud(doc)) await cloud.renameDocument(doc.id, name);
+    await updateDoc(doc.id, { name });
     el.viewerTitle.textContent = name;
     renderLibrary();
   } catch (error) {
@@ -260,20 +656,53 @@ async function renameCurrent() {
   }
 }
 
+function moveCurrent() {
+  const doc = state.current;
+  if (waitIfUploading(doc)) return;
+  const current = doc.carpetaId ?? null;
+  const target = (id, label, depth = 0) => ({
+    label,
+    depth,
+    current: id === current,
+    run: () => moveDocTo(doc, id),
+  });
+  chooseAction(`Mover «${doc.name}» a…`, [
+    target(null, 'Mis PDF'),
+    ...folderTree().map(({ folder, depth }) => target(folder.id, folder.nombre, depth + 1)),
+  ]);
+}
+
+async function moveDocTo(doc, carpetaId) {
+  busy('Moviendo…');
+  try {
+    if (inCloud(doc)) await cloud.moveDocument(doc.id, carpetaId);
+    await updateDoc(doc.id, { carpetaId });
+    renderLibrary();
+    toast(`Movido a «${folderLabel(carpetaId)}»`);
+  } catch (error) {
+    toast(`No se pudo mover: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
 async function deleteCurrent() {
   const doc = state.current;
-  if (!confirm(`¿Eliminar «${doc.name}»? Esta acción no se puede deshacer.`)) return;
+  if (waitIfUploading(doc)) return;
+  const question = inCloud(doc)
+    ? `¿Eliminar «${doc.name}» de la nube y de este iPhone? Esta acción no se puede deshacer.`
+    : `¿Eliminar «${doc.name}»? Esta acción no se puede deshacer.`;
+  if (!confirm(question)) return;
+  busy('Eliminando…');
   try {
-    await deleteDoc(doc.id);
-    state.docs = state.docs.filter((d) => d.id !== doc.id);
-    if (thumbUrls.has(doc.id)) URL.revokeObjectURL(thumbUrls.get(doc.id));
-    thumbUrls.delete(doc.id);
-    closeViewerImages();
-    state.current = null;
+    if (inCloud(doc)) await cloud.deleteDocument(doc.id);
+    await removeLocalDoc(doc.id);
     renderLibrary();
     show('library');
   } catch (error) {
     toast(`No se pudo eliminar: ${error.message}`);
+  } finally {
+    busy(null);
   }
 }
 
@@ -298,6 +727,10 @@ async function importPdfs(files) {
         pdf: new Blob([buffer], { type: 'application/pdf' }),
         thumb: null,
         previews: null,
+        // CamScanner deja su nombre en los metadatos del PDF (Producer/Creator).
+        origen: /CamScanner/i.test(text) ? 'camscanner' : 'importado',
+        estadoOcr: 'pendiente', // en la fase 2 se revisará si ya trae texto
+        ...newDocOwnership(),
       };
       await saveDoc(doc);
       state.docs.push(doc);
@@ -310,6 +743,7 @@ async function importPdfs(files) {
   }
   renderLibrary();
   if (imported) toast(imported === 1 ? 'PDF importado' : `${imported} PDF importados`);
+  processQueue();
 }
 
 // ---------------------------------------------------------------------------
@@ -318,8 +752,11 @@ async function importPdfs(files) {
 
 function newDraft() {
   releaseDraft();
-  state.draft = { pages: [] };
+  state.draft = { pages: [], ownership: newDocOwnership() };
   el.docName.value = defaultName();
+  el.destHint.textContent = signedIn()
+    ? `Se guardará en «${folderLabel(state.folderId)}» y se subirá a la nube.`
+    : 'Se guardará solo en este iPhone. Inicia sesión para guardarlo también en la nube.';
   renderEditor();
   show('editor');
 }
@@ -477,14 +914,31 @@ async function createPdf() {
       if (i === 0) thumb = (await resizeJpeg(page.processed, 360, 0.8)).blob;
     }
     const pdf = buildPdf(pdfPages, { pageSize: settings.pageSize, margins: settings.margins, title: name });
-    const doc = { id: uid(), name, created: Date.now(), size: pdf.size, pageCount: pages.length, pdf, thumb, previews };
+    const doc = {
+      id: uid(),
+      name,
+      created: Date.now(),
+      size: pdf.size,
+      pageCount: pages.length,
+      pdf,
+      thumb,
+      previews,
+      origen: 'app',
+      estadoOcr: 'pendiente', // un escaneo es solo imagen: el texto lo sacará el OCR (fase 4)
+      ...state.draft.ownership,
+    };
     await saveDoc(doc);
     navigator.storage?.persist?.();
     state.docs.push(doc);
     releaseDraft();
     renderLibrary();
     openViewer(doc);
-    toast('PDF creado. Toca «Compartir / Guardar» para enviarlo a otra app.');
+    toast(
+      doc.userId
+        ? 'PDF creado. Se está subiendo a la nube.'
+        : 'PDF creado. Toca «Compartir / Guardar» para enviarlo a otra app.',
+    );
+    processQueue();
   } catch (error) {
     toast(`No se pudo crear el PDF: ${error.message}`);
   } finally {
@@ -775,7 +1229,8 @@ function setup() {
     newDraft();
     el.imagesInput.click();
   });
-  el.importPdfBtn.addEventListener('click', () => el.pdfInput.click());
+  el.importPdfBtn.addEventListener('click', addMenu);
+  el.uploadBannerBtn.addEventListener('click', uploadLocalDocs);
 
   // Entradas de archivo
   el.cameraInput.addEventListener('change', () => {
@@ -851,6 +1306,16 @@ function setup() {
   });
   window.addEventListener('resize', layoutCrop);
 
+  // Al volver la conexión o al volver a la app: sincroniza y sube lo pendiente.
+  let lastSync = 0;
+  window.addEventListener('online', syncNow);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - lastSync > 20_000) {
+      lastSync = Date.now();
+      syncNow();
+    }
+  });
+
   // Visor
   el.viewerBack.addEventListener('click', () => {
     closeViewerImages();
@@ -860,6 +1325,7 @@ function setup() {
   el.shareBtn.addEventListener('click', () => sharePdf(state.current));
   el.downloadBtn.addEventListener('click', () => downloadPdf(state.current));
   el.viewerRename.addEventListener('click', renameCurrent);
+  el.moveBtn.addEventListener('click', moveCurrent);
   el.deleteBtn.addEventListener('click', deleteCurrent);
 
   // Aviso al salir con un documento a medias (solo en el navegador).
@@ -911,6 +1377,7 @@ async function setupAccount() {
   let auth;
   try {
     auth = await import('./auth.js');
+    cloud = await import('./cloud.js');
   } catch {
     ui.accountBtn.addEventListener('click', () => showError('No se pudo cargar la cuenta. Revisa tu conexión y vuelve a abrir la app.'));
     return;
@@ -922,6 +1389,14 @@ async function setupAccount() {
     ui.authForm.hidden = Boolean(user);
     ui.accountInfo.hidden = !user;
     ui.accountEmail.textContent = user?.email ?? '';
+
+    const changed = state.user?.id !== user?.id;
+    state.user = user;
+    if (!changed) return;
+    state.folders = [];
+    state.folderId = null;
+    renderLibrary();
+    if (user) syncNow();
   });
 
   ui.authForm.addEventListener('submit', async (event) => {
@@ -973,12 +1448,11 @@ async function setupAccount() {
 
 async function start() {
   setup();
+  docsLoaded = listDocs()
+    .then((docs) => (state.docs = docs))
+    .catch((error) => toast(`No se pudo abrir el almacenamiento: ${error.message}`));
   setupAccount();
-  try {
-    state.docs = await listDocs();
-  } catch (error) {
-    toast(`No se pudo abrir el almacenamiento: ${error.message}`);
-  }
+  await docsLoaded;
   renderLibrary();
   show('library');
 

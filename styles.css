@@ -295,3 +295,38 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .account-email { margin: -8px 0 0; text-align: center; font-size: 19px; font-weight: 600; word-break: break-all; }
 .hint.center { text-align: center; }
 .danger-text { color: var(--danger); }
+
+/* ---------- Carpetas y nube ---------- */
+
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: -4px 4px 10px; font-size: 14px; color: var(--text-2); }
+.crumbs button { color: var(--accent); font-size: 14px; }
+.crumbs .sep { color: var(--text-3); }
+.banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding: 10px 14px; border-radius: var(--radius); background: var(--accent-soft); font-size: 15px; }
+#folderList:not(:empty) { margin-bottom: 12px; }
+.folder-thumb { color: var(--accent) !important; background: var(--accent-soft) !important; border: 0 !important; height: 46px !important; }
+.folder-thumb svg { width: 26px; height: 26px; }
+.doc-row .date.error { color: var(--danger); }
+.viewer-thumb { width: min(70%, 360px); height: auto; margin-bottom: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18); background: #fff; }
+
+.action-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 8px calc(var(--safe-bottom) + 8px);
+  background: rgba(0, 0, 0, 0.35);
+  animation: fade-in 0.15s ease-out;
+}
+.action-card, .action-cancel { background: var(--surface); color: var(--text); border-radius: 14px; }
+.action-card { max-height: 60vh; overflow-y: auto; }
+.action-title { margin: 0; padding: 12px 16px; text-align: center; font-size: 13px; color: var(--text-2); border-bottom: 0.5px solid var(--separator); }
+.action-item { display: block; width: 100%; padding: 15px 16px; text-align: left; font-size: 17px; color: var(--accent); }
+.action-item + .action-item { border-top: 0.5px solid var(--separator); }
+.action-item.danger { color: var(--danger); }
+.action-item.current { color: var(--text-3); opacity: 1; }
+.action-item.current::after { content: " (actual)"; }
+.action-cancel { width: 100%; padding: 15px; font-size: 17px; font-weight: 600; color: var(--accent); }
+@keyframes fade-in { from { opacity: 0; } }
