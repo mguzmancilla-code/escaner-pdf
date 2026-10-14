@@ -22,6 +22,10 @@ además en tu biblioteca privada en la nube (Supabase), organizados en carpetas.
 - **Cuenta** (ícono de persona, arriba a la izquierda): entra con tu correo y contraseña para usar la nube.
 - **Carpetas**: toca una carpeta para entrar; el botón **⋯** permite renombrarla o eliminarla
   (sus documentos no se borran: pasan a «Mis PDF»). En el visor, el botón de carpeta **mueve** el PDF.
+- **Combinar PDF** (menú **+**): une varios PDF de tu biblioteca (o importados) en uno, en el orden que elijas.
+- **Organizar páginas** (visor › **⋯**): selecciona páginas para girar, eliminar o extraer a un PDF nuevo;
+  arrastra ⠿ para reordenar; **Insertar** agrega páginas de otro PDF; **Dividir** crea un PDF por página.
+  El resultado se guarda como copia nueva; el original no se modifica.
 - **Sin conexión**: puedes seguir escaneando; los PDF quedan pendientes y se suben solos al volver la conexión.
 
 > Sin sesión iniciada, los PDF quedan solo dentro de la app en este iPhone. Con sesión, también quedan en la nube.
@@ -34,6 +38,8 @@ js/app.js             Pantallas y flujo
 js/imaging.js         Detección de bordes, perspectiva, filtros y giros
 js/pdf.js             Generador de PDF (JPEG incrustado sin recomprimir)
 js/pdftext.js         Lectura de PDF con pdf.js: texto y vista previa de páginas
+js/pdfedit.js         Edición de PDF con pdf-lib: combinar, organizar, dividir
+js/vendor/pdf-lib...   Librería pdf-lib (incluida para funcionar sin conexión)
 js/vendor/pdfjs/      Librería pdf.js (incluida para funcionar sin conexión)
 js/db.js              Almacenamiento local (IndexedDB)
 js/auth.js            Cuenta: inicio de sesión con Supabase

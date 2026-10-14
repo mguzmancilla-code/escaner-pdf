@@ -125,7 +125,7 @@
     <header class="bar">
       <button id="viewerBack" class="text-btn back"><span data-icon="chevronLeft"></span>Mis PDF</button>
       <h1 id="viewerTitle"></h1>
-      <button id="viewerRename" class="icon-btn" data-icon="pencil" aria-label="Renombrar"></button>
+      <button id="toolsBtn" class="icon-btn" data-icon="more" aria-label="Más opciones"></button>
     </header>
     <div id="viewerPages" class="scroll viewer-pages"></div>
     <footer class="bottom-actions">
@@ -134,6 +134,33 @@
       <button id="downloadBtn" class="icon-btn boxed" data-icon="download" aria-label="Descargar"></button>
       <button id="deleteBtn" class="icon-btn boxed danger" data-icon="trash" aria-label="Eliminar"></button>
     </footer>
+  </section>
+
+  <!-- Combinar PDF -->
+  <section id="combine" class="screen" hidden>
+    <header class="bar">
+      <button id="combCancel" class="text-btn">Cancelar</button>
+      <h1>Combinar PDF</h1>
+      <button id="combDo" class="text-btn strong">Combinar</button>
+    </header>
+    <div class="scroll">
+      <p class="hint">Toca los PDF en el orden en que quieres unirlos. Vuelve a tocar para quitarlos.</p>
+      <ol id="combOrder" class="comb-order"></ol>
+      <ul id="combList" class="doc-list"></ul>
+      <button id="combImport" class="btn comb-import"><span data-icon="docImport"></span>Agregar PDF desde Archivos</button>
+    </div>
+  </section>
+
+  <!-- Organizar páginas -->
+  <section id="organize" class="screen" hidden>
+    <header class="bar">
+      <button id="orgCancel" class="text-btn">Cancelar</button>
+      <h1 id="orgTitle">Organizar</h1>
+      <button id="orgSave" class="text-btn strong">Guardar</button>
+    </header>
+    <p id="orgHint" class="hint org-hint"></p>
+    <div id="orgGrid" class="org-grid scroll"></div>
+    <footer id="orgActions" class="org-actions"></footer>
   </section>
 
   <!-- Cuenta -->

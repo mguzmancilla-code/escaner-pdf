@@ -41,6 +41,13 @@ const ICONS = {
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
   plusCircle: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
+  combine: '<rect x="3" y="4" width="11" height="14" rx="1.5"/><path d="M17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2"/>',
+  pages: '<rect x="4" y="4" width="10" height="14" rx="1.5"/><path d="M8 7h2M8 10h2"/><rect x="10" y="8" width="10" height="12" rx="1.5" fill="var(--surface)"/>',
+  extract: '<rect x="4" y="3" width="12" height="16" rx="1.5"/><path d="M19 13v6a1 1 0 0 1-1 1h-6M15 17l5-5M20 12v4M20 12h-4"/>',
+  split: '<path d="M12 4v16M7 8H5a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2M17 8h2a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/>',
+  insert: '<rect x="3" y="4" width="10" height="16" rx="1.5"/><path d="M18 9v8M22 13h-8"/>',
+  drag: '<circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/>',
+  check: '<path d="M5 13l4 4L19 7"/>',
 };
 
 const icon = (name) =>
@@ -56,7 +63,9 @@ for (const id of [
   'pageEditor', 'peCancel', 'peDone', 'peTitle', 'peTabs', 'peStage', 'cropBox', 'cropImg', 'cropSvg',
   'previewImg', 'peSpinner', 'loupe', 'cropControls', 'filterControls', 'filterSeg', 'autoBtn', 'fullBtn',
   'peDelete', 'peRotL', 'peRotR', 'peMoveL', 'peMoveR', 'peNextWrap', 'peNext',
-  'viewer', 'viewerBack', 'viewerTitle', 'viewerRename', 'viewerPages', 'shareBtn', 'downloadBtn', 'deleteBtn',
+  'viewer', 'viewerBack', 'viewerTitle', 'viewerPages', 'shareBtn', 'downloadBtn', 'deleteBtn', 'toolsBtn',
+  'combine', 'combCancel', 'combDo', 'combOrder', 'combList', 'combImport',
+  'organize', 'orgCancel', 'orgTitle', 'orgSave', 'orgHint', 'orgGrid', 'orgActions',
   'busy', 'busyText', 'busySpinner', 'busyBar', 'busyBarFill', 'busySub', 'toast',
   'cameraInput', 'imagesInput', 'pdfInput',
 ]) el[id] = $(id);
@@ -420,6 +429,7 @@ function addMenu() {
   const options = [];
   if (signedIn()) options.push({ label: 'Nueva carpeta', run: newFolder });
   options.push({ label: 'Importar PDF', run: () => el.pdfInput.click() });
+  options.push({ label: 'Combinar PDF', run: openCombine });
   chooseAction(signedIn() ? `Agregar en «${folderLabel(state.folderId)}»` : 'Agregar', options);
 }
 
@@ -570,6 +580,440 @@ async function processQueue() {
 
 function syncNow() {
   syncFromCloud().then(processQueue);
+}
+
+// ---------------------------------------------------------------------------
+// Herramientas de PDF: guardar un PDF nuevo (reutilizado por varias herramientas)
+// ---------------------------------------------------------------------------
+
+/** Guarda un PDF resultante como documento nuevo (local o en la nube según sesión). */
+async function saveNewPdf(blob, name) {
+  let pageCount = 0;
+  let thumb = null;
+  let textoOcr = null;
+  try {
+    const pdftext = await import('./pdftext.js');
+    const info = await pdftext.prepareImport(blob);
+    pageCount = info.pageCount;
+    thumb = info.thumb;
+    if (info.text.replace(/\s/g, '').length >= Math.max(16, info.pageCount * 8)) textoOcr = info.text;
+  } catch {
+    try {
+      const edit = await import('./pdfedit.js');
+      pageCount = await edit.pageCount(blob);
+    } catch {
+      /* se queda en 0 */
+    }
+  }
+  const doc = {
+    id: uid(),
+    name: sanitizeName(name) || 'Documento',
+    created: Date.now(),
+    size: blob.size,
+    pageCount,
+    pdf: blob,
+    thumb,
+    previews: null,
+    origen: 'app',
+    textoOcr,
+    estadoOcr: textoOcr ? 'completado' : 'pendiente',
+    ...newDocOwnership(),
+  };
+  await saveDoc(doc);
+  navigator.storage?.persist?.();
+  state.docs.push(doc);
+  return doc;
+}
+
+// ---------------------------------------------------------------------------
+// Herramienta: Combinar PDF
+// ---------------------------------------------------------------------------
+
+const combine = { order: [], extra: new Map() }; // order: ids elegidos; extra: PDF importados solo para combinar
+
+function openCombine() {
+  combine.order = [];
+  combine.extra.clear();
+  renderCombine();
+  el.combine.hidden = false;
+}
+
+function closeCombine() {
+  combine.extra.clear();
+  el.combine.hidden = true;
+}
+
+function combineCandidates() {
+  // PDF de la biblioteca visibles, más los importados temporalmente para esta combinación.
+  const propios = visibleDocs().map((doc) => ({ id: doc.id, name: doc.name, pageCount: doc.pageCount, doc }));
+  const extra = [...combine.extra.entries()].map(([id, e]) => ({ id, name: e.name, pageCount: e.pageCount, extra: true }));
+  return [...extra, ...propios];
+}
+
+function renderCombine() {
+  const candidatos = combineCandidates();
+  const porId = new Map(candidatos.map((c) => [c.id, c]));
+
+  el.combOrder.replaceChildren(
+    ...combine.order.map((id, i) => {
+      const c = porId.get(id);
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="comb-num">${i + 1}</span><span class="comb-name"></span>`;
+      li.querySelector('.comb-name').textContent = c ? c.name : '(no disponible)';
+      return li;
+    }),
+  );
+  el.combOrder.hidden = combine.order.length === 0;
+
+  el.combList.replaceChildren(
+    ...candidatos.map((c) => {
+      const pos = combine.order.indexOf(c.id);
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <button class="doc-row">
+          <span class="thumb comb-check">${pos >= 0 ? `<b>${pos + 1}</b>` : icon('doc')}</span>
+          <span class="meta"><span class="name"></span><span class="sub">${pagesText(c.pageCount)}${c.extra ? ' · recién agregado' : ''}</span></span>
+        </button>`;
+      li.querySelector('.name').textContent = c.name;
+      li.querySelector('.doc-row').classList.toggle('selected-row', pos >= 0);
+      li.querySelector('.doc-row').addEventListener('click', () => {
+        const at = combine.order.indexOf(c.id);
+        if (at >= 0) combine.order.splice(at, 1);
+        else combine.order.push(c.id);
+        renderCombine();
+      });
+      return li;
+    }),
+  );
+  el.combDo.disabled = combine.order.length < 2;
+}
+
+async function runCombine() {
+  if (combine.order.length < 2) return;
+  const porId = new Map(combineCandidates().map((c) => [c.id, c]));
+  busy('Combinando PDF…', { fraction: 0 });
+  try {
+    const edit = await import('./pdfedit.js');
+    const blobs = [];
+    for (const id of combine.order) {
+      const c = porId.get(id);
+      if (!c) continue;
+      if (c.extra) blobs.push(combine.extra.get(id).blob);
+      else blobs.push(await pdfBlobOf(c.doc));
+    }
+    const merged = await edit.mergePdfs(blobs, (n, t) => busy('Combinando PDF…', { fraction: n / t, sub: `Archivo ${n} de ${t}` }));
+    busy('Guardando…', { fraction: 1 });
+    const doc = await saveNewPdf(merged, `Combinado ${combine.order.length} PDF`);
+    closeCombine();
+    renderLibrary();
+    processQueue();
+    openViewer(doc);
+    toast('PDF combinado creado.');
+  } catch (error) {
+    toast(`No se pudo combinar: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+/** Agrega PDF importados desde Archivos a la combinación en curso. */
+async function addToCombine(files) {
+  busy('Leyendo PDF…');
+  try {
+    const edit = await import('./pdfedit.js');
+    for (const file of files) {
+      const buffer = await file.arrayBuffer();
+      if (new TextDecoder('latin1').decode(buffer.slice(0, 4)) !== '%PDF') {
+        toast(`«${file.name}» no es un PDF válido.`);
+        continue;
+      }
+      const blob = new Blob([buffer], { type: 'application/pdf' });
+      const id = `extra-${uid()}`;
+      let pageCount = 0;
+      try {
+        pageCount = await edit.pageCount(blob);
+      } catch {
+        /* se deja en 0 */
+      }
+      combine.extra.set(id, { name: sanitizeName(file.name) || 'PDF', blob, pageCount });
+      combine.order.push(id);
+    }
+    renderCombine();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(null);
+  }
+}
+
+/** Devuelve el PDF de un documento, descargándolo de la nube si solo está allí. */
+async function pdfBlobOf(doc) {
+  if (doc.pdf) return doc.pdf;
+  if (signedIn() && doc.remotePath) {
+    const blob = await cloud.downloadFile(doc.remotePath);
+    await updateDoc(doc.id, { pdf: blob });
+    return blob;
+  }
+  throw new Error(`«${doc.name}» no está disponible sin conexión.`);
+}
+
+// ---------------------------------------------------------------------------
+// Herramienta: Organizar páginas
+// ---------------------------------------------------------------------------
+
+let org = null; // { docName, sources, pages, selected, nextSource, drag }
+
+async function openOrganize(doc) {
+  busy('Abriendo páginas…', { fraction: 0 });
+  try {
+    const blob = await pdfBlobOf(doc);
+    const pdftext = await import('./pdftext.js');
+    const thumbs = await pdftext.renderPdfPages(blob, 500, (n, t) =>
+      busy('Abriendo páginas…', { fraction: n / t, sub: `Página ${n} de ${t}` }),
+    );
+    org = {
+      docName: doc.name,
+      sources: { 0: blob },
+      nextSource: 1,
+      selected: new Set(),
+      drag: null,
+      pages: thumbs.map((thumbBlob, index) => ({
+        source: '0',
+        index,
+        rotate: 0,
+        url: URL.createObjectURL(thumbBlob),
+      })),
+    };
+    renderOrganize();
+    el.organize.hidden = false;
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(null);
+  }
+}
+
+function closeOrganize() {
+  org?.pages.forEach((p) => URL.revokeObjectURL(p.url));
+  org = null;
+  el.organize.hidden = true;
+}
+
+function renderOrganize() {
+  el.orgTitle.textContent = `${org.pages.length} ${org.pages.length === 1 ? 'página' : 'páginas'}`;
+  el.orgHint.textContent = org.selected.size
+    ? `${org.selected.size} seleccionada(s)`
+    : 'Toca para seleccionar. Arrastra ⠿ para reordenar.';
+
+  el.orgGrid.replaceChildren(
+    ...org.pages.map((page, i) => {
+      const card = document.createElement('div');
+      card.className = `org-card${org.selected.has(i) ? ' selected' : ''}`;
+      card.dataset.i = i;
+      card.innerHTML = `
+        <div class="org-thumb" style="transform: rotate(${page.rotate}deg)"><img alt="" src="${page.url}"></div>
+        <span class="org-num">${i + 1}</span>
+        <span class="org-check">${icon('check')}</span>
+        <span class="org-handle" data-handle>${icon('drag')}</span>`;
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('[data-handle]')) return;
+        if (org.selected.has(i)) org.selected.delete(i);
+        else org.selected.add(i);
+        renderOrganize();
+      });
+      card.querySelector('[data-handle]').addEventListener('pointerdown', (e) => startDrag(e, i));
+      return card;
+    }),
+  );
+  renderOrgActions();
+}
+
+function renderOrgActions() {
+  const sel = org.selected.size;
+  const botones = sel
+    ? [
+        { icon: 'rotateLeft', label: 'Girar', run: () => rotateSelected(-90) },
+        { icon: 'rotateRight', label: 'Girar', run: () => rotateSelected(90) },
+        { icon: 'extract', label: 'Extraer', run: extractSelected },
+        { icon: 'trash', label: 'Eliminar', danger: true, run: deleteSelected },
+      ]
+    : [
+        { icon: 'insert', label: 'Insertar', run: insertPages },
+        { icon: 'split', label: 'Dividir', run: splitCurrent },
+      ];
+  el.orgActions.replaceChildren(
+    ...botones.map((b) => {
+      const button = document.createElement('button');
+      button.className = `org-action${b.danger ? ' danger' : ''}`;
+      button.innerHTML = `${icon(b.icon)}<span>${b.label}</span>`;
+      button.addEventListener('click', b.run);
+      return button;
+    }),
+  );
+}
+
+function rotateSelected(delta) {
+  for (const i of org.selected) org.pages[i].rotate = (((org.pages[i].rotate + delta) % 360) + 360) % 360;
+  renderOrganize();
+}
+
+function deleteSelected() {
+  if (org.selected.size === org.pages.length) return toast('No puedes eliminar todas las páginas.');
+  const quedan = org.pages.filter((_, i) => !org.selected.has(i));
+  org.pages.filter((_, i) => org.selected.has(i)).forEach((p) => URL.revokeObjectURL(p.url));
+  org.pages = quedan;
+  org.selected.clear();
+  renderOrganize();
+}
+
+async function extractSelected() {
+  const indices = [...org.selected].sort((a, b) => a - b);
+  busy('Extrayendo páginas…');
+  try {
+    const edit = await import('./pdfedit.js');
+    const blob = await edit.composePages(org.sources, indices.map((i) => ({ source: org.pages[i].source, index: org.pages[i].index, rotate: org.pages[i].rotate })));
+    const doc = await saveNewPdf(blob, `${org.docName} (extracto)`);
+    closeOrganize();
+    renderLibrary();
+    processQueue();
+    openViewer(doc);
+    toast(indices.length === 1 ? 'Página extraída a un PDF nuevo.' : `${indices.length} páginas extraídas a un PDF nuevo.`);
+  } catch (error) {
+    toast(`No se pudo extraer: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+function insertPages() {
+  // Reutiliza el selector de archivos de PDF, en modo «insertar».
+  org.inserting = true;
+  el.pdfInput.click();
+}
+
+async function insertFromFiles(files) {
+  busy('Agregando páginas…', { fraction: 0 });
+  try {
+    const pdftext = await import('./pdftext.js');
+    for (const file of files) {
+      const buffer = await file.arrayBuffer();
+      if (new TextDecoder('latin1').decode(buffer.slice(0, 4)) !== '%PDF') continue;
+      const blob = new Blob([buffer], { type: 'application/pdf' });
+      const sourceId = String(org.nextSource++);
+      org.sources[sourceId] = blob;
+      const thumbs = await pdftext.renderPdfPages(blob, 500, (n, t) =>
+        busy('Agregando páginas…', { fraction: n / t, sub: `${file.name} · página ${n} de ${t}` }),
+      );
+      thumbs.forEach((thumbBlob, index) =>
+        org.pages.push({ source: sourceId, index, rotate: 0, url: URL.createObjectURL(thumbBlob) }),
+      );
+    }
+    renderOrganize();
+  } catch (error) {
+    toast(`No se pudieron agregar páginas: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+async function splitCurrent() {
+  if (!confirm(`¿Dividir en ${org.pages.length} PDF, uno por cada página?`)) return;
+  busy('Dividiendo…', { fraction: 0 });
+  try {
+    const edit = await import('./pdfedit.js');
+    // Primero se arma el PDF con el orden y giros actuales, luego se divide.
+    const compuesto = await edit.composePages(
+      org.sources,
+      org.pages.map((p) => ({ source: p.source, index: p.index, rotate: p.rotate })),
+    );
+    const partes = await edit.splitPdf(compuesto, (n, t) => busy('Dividiendo…', { fraction: n / t, sub: `Página ${n} de ${t}` }));
+    const base = org.docName;
+    for (const [i, parte] of partes.entries()) {
+      busy('Guardando…', { fraction: (i + 1) / partes.length, sub: `${i + 1} de ${partes.length}` });
+      await saveNewPdf(parte.blob, `${base} — página ${parte.pageNumber}`);
+    }
+    closeOrganize();
+    renderLibrary();
+    processQueue();
+    show('library');
+    toast(`Dividido en ${partes.length} PDF.`);
+  } catch (error) {
+    toast(`No se pudo dividir: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+async function saveOrganized() {
+  busy('Guardando cambios…');
+  try {
+    const edit = await import('./pdfedit.js');
+    const blob = await edit.composePages(
+      org.sources,
+      org.pages.map((p) => ({ source: p.source, index: p.index, rotate: p.rotate })),
+    );
+    const doc = await saveNewPdf(blob, `${org.docName} (editado)`);
+    closeOrganize();
+    renderLibrary();
+    processQueue();
+    openViewer(doc);
+    toast('PDF guardado como copia nueva.');
+  } catch (error) {
+    toast(`No se pudo guardar: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+// Reordenar arrastrando el tirador ⠿.
+function startDrag(event, from) {
+  event.preventDefault();
+  const card = event.target.closest('.org-card');
+  card.setPointerCapture(event.pointerId);
+  org.drag = { from, pointerId: event.pointerId, card };
+  card.classList.add('dragging');
+  const move = (e) => onDragMove(e);
+  const up = (e) => {
+    card.releasePointerCapture(e.pointerId);
+    card.removeEventListener('pointermove', move);
+    card.removeEventListener('pointerup', up);
+    card.removeEventListener('pointercancel', up);
+    finishDrag();
+  };
+  card.addEventListener('pointermove', move);
+  card.addEventListener('pointerup', up);
+  card.addEventListener('pointercancel', up);
+}
+
+function onDragMove(event) {
+  if (!org?.drag) return;
+  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('.org-card');
+  if (!target) return;
+  const to = Number(target.dataset.i);
+  if (Number.isNaN(to) || to === org.drag.from) return;
+  const [moved] = org.pages.splice(org.drag.from, 1);
+  org.pages.splice(to, 0, moved);
+  // Mantener la selección pegada a las páginas movidas es complejo: se limpia.
+  org.selected.clear();
+  org.drag.from = to;
+  renderOrganize();
+  org.drag.card = el.orgGrid.querySelector(`.org-card[data-i="${to}"]`);
+  org.drag.card?.classList.add('dragging');
+}
+
+function finishDrag() {
+  org.drag = null;
+  el.orgGrid.querySelectorAll('.dragging').forEach((c) => c.classList.remove('dragging'));
+  renderOrganize();
+}
+
+/** Menú «Más» del visor: renombrar, organizar páginas. */
+function toolsMenu() {
+  const doc = state.current;
+  chooseAction(doc.name, [
+    { label: 'Organizar páginas', run: () => openOrganize(doc) },
+    { label: 'Renombrar', run: renameCurrent },
+  ]);
 }
 
 function uploadLocalDocs() {
@@ -1368,8 +1812,28 @@ function setup() {
   el.pdfInput.addEventListener('change', () => {
     const files = [...el.pdfInput.files];
     el.pdfInput.value = '';
-    if (files.length) importPdfs(files);
+    if (!files.length) return;
+    if (org?.inserting) {
+      org.inserting = false;
+      insertFromFiles(files);
+    } else if (!el.combine.hidden) {
+      addToCombine(files);
+    } else {
+      importPdfs(files);
+    }
   });
+
+  // Combinar PDF
+  el.combCancel.addEventListener('click', closeCombine);
+  el.combDo.addEventListener('click', runCombine);
+  el.combImport.addEventListener('click', () => el.pdfInput.click());
+
+  // Organizar páginas
+  el.orgCancel.addEventListener('click', () => {
+    if (org?.pages.length && !confirm('¿Descartar los cambios de organización?')) return;
+    closeOrganize();
+  });
+  el.orgSave.addEventListener('click', saveOrganized);
 
   // Nuevo PDF
   el.editorCancel.addEventListener('click', cancelDraft);
@@ -1446,7 +1910,7 @@ function setup() {
   });
   el.shareBtn.addEventListener('click', () => sharePdf(state.current));
   el.downloadBtn.addEventListener('click', () => downloadPdf(state.current));
-  el.viewerRename.addEventListener('click', renameCurrent);
+  el.toolsBtn.addEventListener('click', toolsMenu);
   el.moveBtn.addEventListener('click', moveCurrent);
   el.deleteBtn.addEventListener('click', deleteCurrent);
 
