@@ -1080,47 +1080,138 @@ function closeAnnotate() {
   el.annotate.hidden = true;
 }
 
+const ANN_COLORS = ['#e5332a', '#1a4fd6', '#111111', '#2e7d32', '#ffe600', '#37d67a', '#2ccce4', '#ff6bb5', '#ff8c00'];
+
+function setAnnColor(value) {
+  ann.color = value;
+  const it = ann.selected && ann.items.find((i) => i.id === ann.selected);
+  if (it) it.color = value;
+  renderAnnTools();
+  markAnnSelected();
+}
+
 function renderAnnTools() {
-  el.annTools.replaceChildren(
-    ...ANN_TOOLS.map((t) => {
-      const b = document.createElement('button');
-      b.className = `ann-tool${ann.tool === t.id ? ' active' : ''}`;
-      b.innerHTML = `${icon(t.icon)}<span>${t.label}</span>`;
-      b.addEventListener('click', () => {
-        ann.tool = t.id;
-        ann.selected = null;
-        renderAnnTools();
-        renderAnnPages();
-      });
-      return b;
-    }),
-  );
-  // Selector de color
-  const color = document.createElement('input');
-  color.type = 'color';
-  color.className = 'ann-color';
-  color.value = ann.color;
-  color.title = 'Color';
-  color.addEventListener('input', () => {
-    ann.color = color.value;
-    if (ann.selected) {
-      const it = ann.items.find((i) => i.id === ann.selected);
-      if (it) {
-        it.color = color.value;
-        renderAnnPages();
-      }
-    }
+  const tools = ANN_TOOLS.map((t) => {
+    const b = document.createElement('button');
+    b.className = `ann-tool${ann.tool === t.id ? ' active' : ''}`;
+    b.innerHTML = `${icon(t.icon)}<span>${t.label}</span>`;
+    b.addEventListener('click', () => {
+      ann.tool = t.id;
+      ann.selected = null;
+      renderAnnTools();
+      markAnnSelected();
+    });
+    return b;
   });
-  el.annTools.append(color);
-  // Eliminar seleccionado
+
+  const sep = () => Object.assign(document.createElement('span'), { className: 'ann-sep' });
+
+  // Paleta de colores (chips) + selector personalizado.
+  const palette = document.createElement('div');
+  palette.className = 'ann-palette';
+  for (const c of ANN_COLORS) {
+    const chip = document.createElement('button');
+    chip.className = `ann-chip${c === ann.color ? ' active' : ''}`;
+    chip.style.background = c;
+    chip.title = c;
+    chip.addEventListener('click', () => setAnnColor(c));
+    palette.append(chip);
+  }
+  const custom = document.createElement('input');
+  custom.type = 'color';
+  custom.className = 'ann-color';
+  custom.value = ann.color;
+  custom.title = 'Otro color';
+  custom.addEventListener('input', () => setAnnColor(custom.value));
+  palette.append(custom);
+
+  const extras = [];
+  // Importar una imagen de firma (p. ej. PNG con fondo transparente).
+  if (ann.tool === 'draw') {
+    const imp = document.createElement('button');
+    imp.className = 'ann-tool';
+    imp.innerHTML = `${icon('download')}<span>Importar firma</span>`;
+    imp.addEventListener('click', importSignature);
+    extras.push(imp);
+  }
   if (ann.selected) {
     const del = document.createElement('button');
     del.className = 'ann-tool danger';
     del.innerHTML = `${icon('trash')}<span>Borrar</span>`;
     del.addEventListener('click', deleteAnnSelected);
-    el.annTools.append(del);
+    extras.push(del);
   }
+
+  el.annTools.replaceChildren(...tools, sep(), palette, ...(extras.length ? [sep(), ...extras] : []));
   el.annHint.textContent = ANN_HINTS[ann.tool];
+}
+
+async function importSignature() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    busy('Cargando firma…');
+    try {
+      // Se normaliza a PNG (conserva la transparencia de las firmas recortadas).
+      const dataUrl = await imageToPng(file);
+      const img = await loadImageEl(dataUrl);
+      const page = ann.pages[0];
+      const ar = img.width / img.height; // ancho/alto de la imagen
+      const wr = 0.32; // 32% del ancho de la página
+      const hr = (wr * page.width) / ar / page.height;
+      ann.items.push({
+        id: ann.nextId++,
+        page: 0,
+        type: 'image',
+        xr: (1 - wr) / 2,
+        yr: 0.8,
+        wr,
+        hr,
+        dataUrl,
+      });
+      ann.tool = 'select';
+      renderAnnTools();
+      renderAnnPages();
+      toast('Firma agregada. Arrástrala a su lugar.');
+    } catch (error) {
+      toast(`No se pudo cargar la firma: ${error.message}`);
+    } finally {
+      busy(null);
+    }
+  });
+  input.click();
+}
+
+function imageToPng(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    reader.onload = async () => {
+      try {
+        const img = await loadImageEl(reader.result);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageEl(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Imagen no válida.'));
+    img.src = src;
+  });
 }
 
 function renderAnnPages() {
@@ -1151,6 +1242,14 @@ function renderAnnItems(layer, pageIndex) {
       node.style.color = it.color;
       node.style.fontSize = `${it.size * 100}cqh`; // relativo a la altura de la página
       node.textContent = it.text;
+    } else if (it.type === 'image') {
+      node = document.createElement('div');
+      node.className = 'ann-item ann-image';
+      node.style.left = `${it.xr * 100}%`;
+      node.style.top = `${it.yr * 100}%`;
+      node.style.width = `${it.wr * 100}%`;
+      node.style.height = `${it.hr * 100}%`;
+      node.innerHTML = `<img alt="Firma" src="${it.dataUrl}">`;
     } else {
       node = document.createElement('div');
       node.className = `ann-item ann-${it.type}`;
@@ -1174,6 +1273,13 @@ function renderAnnItems(layer, pageIndex) {
   }
 }
 
+/** Vuelve a pintar las capas (sin recrear las páginas) para reflejar la selección. */
+function markAnnSelected() {
+  el.annPages.querySelectorAll('.ann-page').forEach((wrap) => {
+    renderAnnItems(wrap.querySelector('.ann-layer'), Number(wrap.dataset.page));
+  });
+}
+
 function annRelative(event, wrap) {
   const r = wrap.getBoundingClientRect();
   return {
@@ -1191,15 +1297,17 @@ function annPointerDown(event, pageIndex, wrap) {
       ann.selected = Number(hitId);
       const it = ann.items.find((i) => i.id === ann.selected);
       const start = annRelative(event, wrap);
-      ann.drag = { id: it.id, offX: start.xr - it.xr, offY: start.yr - it.yr, wrap };
+      // Se arrastra actualizando solo la capa (no se recrea la página, para no
+      // perder el «pointer capture»).
+      ann.drag = { id: it.id, lastX: start.xr, lastY: start.yr, wrap, layer: wrap.querySelector('.ann-layer') };
       wrap.setPointerCapture(event.pointerId);
       bindAnnMove(wrap, event.pointerId);
+      markAnnSelected();
       renderAnnTools();
-      renderAnnPages();
     } else {
       ann.selected = null;
+      markAnnSelected();
       renderAnnTools();
-      renderAnnPages();
     }
     return;
   }
@@ -1242,9 +1350,16 @@ function annPointerMove(event, wrap) {
   if (ann.drag) {
     const it = ann.items.find((i) => i.id === ann.drag.id);
     if (it) {
-      it.xr = clamp01(p.xr - ann.drag.offX);
-      it.yr = clamp01(p.yr - ann.drag.offY);
-      renderAnnPages();
+      const dx = p.xr - ann.drag.lastX;
+      const dy = p.yr - ann.drag.lastY;
+      ann.drag.lastX = p.xr;
+      ann.drag.lastY = p.yr;
+      if (it.type === 'draw') it.points = it.points.map(([x, y]) => [clamp01(x + dx), clamp01(y + dy)]);
+      else {
+        it.xr = clamp01(it.xr + dx);
+        it.yr = clamp01(it.yr + dy);
+      }
+      renderAnnItems(ann.drag.layer, it.page); // solo la capa; el wrap se mantiene
     }
     return;
   }

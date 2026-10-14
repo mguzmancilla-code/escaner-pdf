@@ -164,6 +164,29 @@ export async function applyAnnotations(blob, items) {
         lineHeight: size * 1.25,
         rotate: PDFLib.degrees(rot), // para que el texto se lea derecho en páginas giradas
       });
+    } else if (it.type === 'image' && it.dataUrl) {
+      const bytes = Uint8Array.from(atob(it.dataUrl.split(',')[1]), (c) => c.charCodeAt(0));
+      const embedded = it.dataUrl.startsWith('data:image/png')
+        ? await doc.embedPng(bytes)
+        : await doc.embedJpg(bytes);
+      const [x0, y0] = toPdf(it.xr, it.yr);
+      const [x1, y1] = toPdf(it.xr + it.wr, it.yr + it.hr);
+      // Para páginas giradas, drawImage ancla en una esquina y rota; se elige la
+      // esquina correcta según la rotación para que quede donde se ve en pantalla.
+      const anchors = {
+        0: [Math.min(x0, x1), Math.min(y0, y1)],
+        90: [x0, y0],
+        180: [Math.max(x0, x1), Math.max(y0, y1)],
+        270: [x1, y1],
+      };
+      const [ax, ay] = anchors[rot] || anchors[0];
+      page.drawImage(embedded, {
+        x: ax,
+        y: ay,
+        width: it.wr * (rot === 90 || rot === 270 ? H : W),
+        height: it.hr * (rot === 90 || rot === 270 ? W : H),
+        rotate: PDFLib.degrees(rot),
+      });
     } else if (it.type === 'draw' && it.points?.length > 1) {
       const thickness = (it.thickness || 0.004) * vista.h;
       for (let i = 1; i < it.points.length; i++) {

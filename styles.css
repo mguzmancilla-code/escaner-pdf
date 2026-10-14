@@ -439,3 +439,11 @@ svg.icon { width: 22px; height: 22px; flex: none; }
   .ann-tools { justify-content: center; }
   .ann-tool:hover { background: var(--surface-2); }
 }
+
+/* Paleta de colores e imagen de firma en Anotar */
+.ann-sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--separator); flex: none; }
+.ann-palette { display: flex; align-items: center; gap: 5px; flex: none; }
+.ann-chip { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; flex: none; padding: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15); }
+.ann-chip.active { border-color: var(--text); }
+.ann-image { pointer-events: auto; }
+.ann-image img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
