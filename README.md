@@ -1,9 +1,10 @@
-# Escáner PDF (app web para iPhone)
+# Escáner PDF (app web)
 
 Escanea documentos con la cámara, convierte imágenes en PDF de alta calidad y envíalos a otras apps.
 Funciona en Safari, se instala en la pantalla de inicio y no necesita Mac ni App Store.
-El escaneo y el procesado de imágenes se hacen en el propio iPhone. Si inicias sesión, tus PDF se guardan
-además en tu biblioteca privada en la nube (Supabase), organizados en carpetas.
+Funciona en el iPhone (sobre todo para escanear) y en el navegador de un computador (para editar con
+pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblioteca privada en la nube
+(Supabase) y están disponibles en ambos lados.
 
 ## Instalar en el iPhone
 1. Abre la dirección de la app en **Safari**.

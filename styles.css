@@ -371,3 +371,41 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .org-action { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 10px; color: var(--accent); font-size: 12px; font-weight: 500; }
 .org-action.danger { color: var(--danger); }
 .org-action svg { width: 24px; height: 24px; }
+
+/* ---------- Adaptación a computador (edición en pantalla grande) ---------- */
+
+:root { --page: 860px; --page-wide: 1180px; }
+
+/* Centra el contenido en pantallas anchas; en el teléfono deja 16px de margen. */
+.bar,
+.scroll,
+.bottom-actions,
+.org-actions,
+.org-hint { padding-inline: max(16px, calc((100% - var(--page)) / 2)); }
+.org-grid { padding-inline: max(16px, calc((100% - var(--page-wide)) / 2)); }
+
+@media (min-width: 768px) {
+  /* Las miniaturas de páginas (nuevo PDF y organizar) aprovechan el ancho. */
+  .page-grid, .org-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
+
+  /* Menús: diálogo centrado en lugar de hoja que sube desde abajo. */
+  .action-sheet { align-items: center; justify-content: center; padding: 24px; }
+  .action-card, .action-cancel { width: 420px; max-width: 90vw; }
+  .action-card { border-radius: 16px; max-height: 70vh; }
+
+  /* Barra de acciones de organizar: botones agrupados al centro, no estirados. */
+  .org-actions { justify-content: center; gap: 28px; }
+  .org-action { padding: 6px 18px; }
+}
+
+/* Estados al pasar el cursor (solo con ratón). */
+@media (hover: hover) {
+  .doc-row:hover { background: var(--surface-2); }
+  .btn:hover:not(:disabled), .icon-btn:hover:not(:disabled), .chip:hover { filter: brightness(1.06); }
+  .org-card:hover { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
+  .org-handle:hover { color: var(--accent); }
+  .action-item:hover:not(:disabled) { background: var(--surface-2); }
+  .text-btn:hover { opacity: 0.6; }
+  .crumbs button:hover { text-decoration: underline; }
+  .org-action:hover { filter: brightness(1.08); }
+}
