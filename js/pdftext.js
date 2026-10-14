@@ -100,3 +100,30 @@ export async function renderPdfPages(data, maxSide = 1400, onPage) {
   }
   return blobs;
 }
+
+/**
+ * Como renderPdfPages, pero además devuelve el tamaño real de cada página en
+ * puntos PDF y su rotación (para colocar anotaciones con precisión).
+ * @returns {{blob: Blob, width: number, height: number, rotation: number}[]}
+ */
+export async function renderPdfPagesDetailed(data, maxSide = 1400, onPage) {
+  const doc = await openPdf(data);
+  const salida = [];
+  try {
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = await doc.getPage(n);
+      const vp = page.getViewport({ scale: 1 }); // 1 unidad CSS = 1 punto PDF
+      salida.push({
+        blob: await pageToBlob(page, maxSide, 0.82),
+        width: vp.width,
+        height: vp.height,
+        rotation: (page.rotate % 360 + 360) % 360,
+      });
+      page.cleanup();
+      onPage?.(n, doc.numPages);
+    }
+  } finally {
+    await doc.destroy();
+  }
+  return salida;
+}

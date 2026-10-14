@@ -81,3 +81,103 @@ export async function pageCount(blob) {
   const PDFLib = await pdflib();
   return (await loadDoc(PDFLib, blob)).getPageCount();
 }
+
+/**
+ * Convierte un punto relativo de la vista (ur, vr) ∈ [0,1], con origen
+ * arriba-izquierda, a coordenadas PDF (puntos, origen abajo-izquierda) en una
+ * página de MediaBox W×H con rotación `rot` (0/90/180/270).
+ */
+function viewToPdf(ur, vr, W, H, rot) {
+  const rot90 = rot === 90 || rot === 270;
+  const dx = ur * (rot90 ? H : W); // píxeles de vista desde la izquierda
+  const dy = vr * (rot90 ? W : H); // píxeles de vista desde arriba
+  switch (rot) {
+    case 90:
+      return [dy, dx];
+    case 180:
+      return [W - dx, dy];
+    case 270:
+      return [W - dy, H - dx];
+    default:
+      return [dx, H - dy];
+  }
+}
+
+const hexToRgb = (PDFLib, hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return PDFLib.rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+};
+
+/**
+ * Dibuja anotaciones sobre un PDF y devuelve una copia nueva. Las coordenadas de
+ * cada anotación son relativas (0–1) al alto/ancho de la página, con origen
+ * arriba-izquierda (como en pantalla). Tipos: text, redact, highlight, draw.
+ */
+export async function applyAnnotations(blob, items) {
+  const PDFLib = await pdflib();
+  const doc = await loadDoc(PDFLib, blob);
+  const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+  const pages = doc.getPages();
+
+  for (const it of items) {
+    const page = pages[it.page];
+    if (!page) continue;
+    const { width: W, height: H } = page.getSize();
+    const rot = ((page.getRotation().angle % 360) + 360) % 360;
+    const color = hexToRgb(PDFLib, it.color || '#000000');
+    // Convierte un punto relativo de la vista (origen arriba-izquierda) a puntos
+    // PDF (origen abajo-izquierda), teniendo en cuenta la rotación de la página.
+    const toPdf = (ur, vr) => viewToPdf(ur, vr, W, H, rot);
+    // La dimensión "corta" de la vista según la orientación (para alto de texto).
+    const vista = rot === 90 || rot === 270 ? { w: H, h: W } : { w: W, h: H };
+
+    if (it.type === 'redact' || it.type === 'highlight') {
+      const [x0, y0] = toPdf(it.xr, it.yr);
+      const [x1, y1] = toPdf(it.xr + it.wr, it.yr + it.hr);
+      page.drawRectangle({
+        x: Math.min(x0, x1),
+        y: Math.min(y0, y1),
+        width: Math.abs(x1 - x0),
+        height: Math.abs(y1 - y0),
+        color,
+        opacity: it.type === 'highlight' ? 0.35 : 1,
+      });
+    } else if (it.type === 'text') {
+      const size = (it.size || 0.02) * vista.h;
+      // WinAnsi (Helvetica) no soporta todos los caracteres: se normaliza la
+      // puntuación tipográfica común y el resto se sustituye por «?».
+      const texto = (it.text || '')
+        .replace(/[–—]/g, '-') // – —
+        .replace(/[‘’‚]/g, "'") // ' ' ‚
+        .replace(/[“”„]/g, '"') // " " „
+        .replace(/…/g, '...') // …
+        .replace(/[^\x00-\xFF]/g, '?');
+      // La baseline queda `size` por debajo del borde superior de la caja.
+      const baselineV = it.yr + size / vista.h;
+      const [x, y] = toPdf(it.xr, baselineV);
+      page.drawText(texto, {
+        x,
+        y,
+        size,
+        font,
+        color,
+        lineHeight: size * 1.25,
+        rotate: PDFLib.degrees(rot), // para que el texto se lea derecho en páginas giradas
+      });
+    } else if (it.type === 'draw' && it.points?.length > 1) {
+      const thickness = (it.thickness || 0.004) * vista.h;
+      for (let i = 1; i < it.points.length; i++) {
+        const [ax, ay] = toPdf(it.points[i - 1][0], it.points[i - 1][1]);
+        const [bx, by] = toPdf(it.points[i][0], it.points[i][1]);
+        page.drawLine({
+          start: { x: ax, y: ay },
+          end: { x: bx, y: by },
+          thickness,
+          color,
+          lineCap: PDFLib.LineCapStyle.Round,
+        });
+      }
+    }
+  }
+  return asBlob(await doc.save());
+}

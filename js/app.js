@@ -48,6 +48,11 @@ const ICONS = {
   insert: '<rect x="3" y="4" width="10" height="16" rx="1.5"/><path d="M18 9v8M22 13h-8"/>',
   drag: '<circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/>',
   check: '<path d="M5 13l4 4L19 7"/>',
+  cursor: '<path d="M5 3l6 16 2.3-6.7L20 10z"/>',
+  textT: '<path d="M5 5h14M12 5v14M9 19h6"/>',
+  marker: '<path d="M4 20h16M6 16l8-8 4 4-8 8H6z"/>',
+  redactbox: '<rect x="4" y="6" width="16" height="12" rx="1" fill="currentColor"/>',
+  signature: '<path d="M4 17c3 0 3-10 6-10s0 10 3 10 2-6 4-6 2 2 3 2"/>',
 };
 
 const icon = (name) =>
@@ -66,6 +71,7 @@ for (const id of [
   'viewer', 'viewerBack', 'viewerTitle', 'viewerPages', 'shareBtn', 'downloadBtn', 'deleteBtn', 'toolsBtn',
   'combine', 'combCancel', 'combDo', 'combOrder', 'combList', 'combImport',
   'organize', 'orgCancel', 'orgTitle', 'orgSave', 'orgHint', 'orgGrid', 'orgActions',
+  'annotate', 'annCancel', 'annSave', 'annTools', 'annHint', 'annPages',
   'busy', 'busyText', 'busySpinner', 'busyBar', 'busyBarFill', 'busySub', 'toast',
   'cameraInput', 'imagesInput', 'pdfInput',
 ]) el[id] = $(id);
@@ -1007,13 +1013,316 @@ function finishDrag() {
   renderOrganize();
 }
 
-/** Menú «Más» del visor: renombrar, organizar páginas. */
+/** Menú «Más» del visor: anotar, organizar páginas, renombrar. */
 function toolsMenu() {
   const doc = state.current;
   chooseAction(doc.name, [
+    { label: 'Anotar / firmar', run: () => openAnnotate(doc) },
     { label: 'Organizar páginas', run: () => openOrganize(doc) },
     { label: 'Renombrar', run: renameCurrent },
   ]);
+}
+
+// ---------------------------------------------------------------------------
+// Herramienta: Anotar / firmar
+// ---------------------------------------------------------------------------
+
+const ANN_TOOLS = [
+  { id: 'select', icon: 'cursor', label: 'Mover' },
+  { id: 'text', icon: 'textT', label: 'Texto' },
+  { id: 'redact', icon: 'redactbox', label: 'Tapar' },
+  { id: 'highlight', icon: 'marker', label: 'Resaltar' },
+  { id: 'draw', icon: 'signature', label: 'Firmar' },
+];
+const ANN_HINTS = {
+  select: 'Toca una anotación para seleccionarla; arrástrala para moverla.',
+  text: 'Toca donde quieras escribir.',
+  redact: 'Arrastra para tapar un área (recuadro opaco).',
+  highlight: 'Arrastra para resaltar (color translúcido).',
+  draw: 'Arrastra para firmar o dibujar a mano alzada.',
+};
+
+let ann = null; // { doc, sourceBlob, pages, items, tool, color, selected, draft, drag }
+
+async function openAnnotate(doc) {
+  busy('Abriendo documento…', { fraction: 0 });
+  try {
+    const blob = await pdfBlobOf(doc);
+    const pdftext = await import('./pdftext.js');
+    const pages = await pdftext.renderPdfPagesDetailed(blob, 1600, (n, t) =>
+      busy('Abriendo documento…', { fraction: n / t, sub: `Página ${n} de ${t}` }),
+    );
+    ann = {
+      doc,
+      sourceBlob: blob,
+      pages: pages.map((p) => ({ width: p.width, height: p.height, rotation: p.rotation, url: URL.createObjectURL(p.blob) })),
+      items: [],
+      tool: 'select',
+      color: '#e5332a',
+      selected: null,
+      draft: null,
+      drag: null,
+      nextId: 1,
+    };
+    renderAnnTools();
+    renderAnnPages();
+    el.annotate.hidden = false;
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(null);
+  }
+}
+
+function closeAnnotate() {
+  ann?.pages.forEach((p) => URL.revokeObjectURL(p.url));
+  ann = null;
+  el.annotate.hidden = true;
+}
+
+function renderAnnTools() {
+  el.annTools.replaceChildren(
+    ...ANN_TOOLS.map((t) => {
+      const b = document.createElement('button');
+      b.className = `ann-tool${ann.tool === t.id ? ' active' : ''}`;
+      b.innerHTML = `${icon(t.icon)}<span>${t.label}</span>`;
+      b.addEventListener('click', () => {
+        ann.tool = t.id;
+        ann.selected = null;
+        renderAnnTools();
+        renderAnnPages();
+      });
+      return b;
+    }),
+  );
+  // Selector de color
+  const color = document.createElement('input');
+  color.type = 'color';
+  color.className = 'ann-color';
+  color.value = ann.color;
+  color.title = 'Color';
+  color.addEventListener('input', () => {
+    ann.color = color.value;
+    if (ann.selected) {
+      const it = ann.items.find((i) => i.id === ann.selected);
+      if (it) {
+        it.color = color.value;
+        renderAnnPages();
+      }
+    }
+  });
+  el.annTools.append(color);
+  // Eliminar seleccionado
+  if (ann.selected) {
+    const del = document.createElement('button');
+    del.className = 'ann-tool danger';
+    del.innerHTML = `${icon('trash')}<span>Borrar</span>`;
+    del.addEventListener('click', deleteAnnSelected);
+    el.annTools.append(del);
+  }
+  el.annHint.textContent = ANN_HINTS[ann.tool];
+}
+
+function renderAnnPages() {
+  el.annPages.replaceChildren(
+    ...ann.pages.map((page, i) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'ann-page';
+      wrap.style.aspectRatio = `${page.width} / ${page.height}`;
+      wrap.dataset.page = i;
+      wrap.innerHTML = `<img alt="Página ${i + 1}" src="${page.url}"><div class="ann-layer"></div>`;
+      wrap.querySelector('.ann-layer').style.cursor = ann.tool === 'select' ? 'default' : 'crosshair';
+      wrap.addEventListener('pointerdown', (e) => annPointerDown(e, i, wrap));
+      renderAnnItems(wrap.querySelector('.ann-layer'), i);
+      return wrap;
+    }),
+  );
+}
+
+function renderAnnItems(layer, pageIndex) {
+  layer.replaceChildren();
+  for (const it of ann.items.filter((x) => x.page === pageIndex)) {
+    let node;
+    if (it.type === 'text') {
+      node = document.createElement('div');
+      node.className = 'ann-item ann-text';
+      node.style.left = `${it.xr * 100}%`;
+      node.style.top = `${it.yr * 100}%`;
+      node.style.color = it.color;
+      node.style.fontSize = `${it.size * 100}cqh`; // relativo a la altura de la página
+      node.textContent = it.text;
+    } else {
+      node = document.createElement('div');
+      node.className = `ann-item ann-${it.type}`;
+      node.style.left = `${it.xr * 100}%`;
+      node.style.top = `${it.yr * 100}%`;
+      node.style.width = `${it.wr * 100}%`;
+      node.style.height = `${it.hr * 100}%`;
+      if (it.type === 'redact') node.style.background = it.color;
+      if (it.type === 'highlight') node.style.background = it.color;
+      if (it.type === 'draw') {
+        node.className = 'ann-item ann-draw';
+        node.style.left = node.style.top = '0';
+        node.style.width = node.style.height = '100%';
+        const pts = it.points.map(([x, y]) => `${x * 100},${y * 100}`).join(' ');
+        node.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${it.color}" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+      }
+    }
+    node.dataset.id = it.id;
+    if (it.id === ann.selected) node.classList.add('selected');
+    layer.append(node);
+  }
+}
+
+function annRelative(event, wrap) {
+  const r = wrap.getBoundingClientRect();
+  return {
+    xr: clamp01((event.clientX - r.left) / r.width),
+    yr: clamp01((event.clientY - r.top) / r.height),
+  };
+}
+
+function annPointerDown(event, pageIndex, wrap) {
+  if (!ann) return;
+  const hitId = event.target.closest('.ann-item')?.dataset.id;
+
+  if (ann.tool === 'select') {
+    if (hitId) {
+      ann.selected = Number(hitId);
+      const it = ann.items.find((i) => i.id === ann.selected);
+      const start = annRelative(event, wrap);
+      ann.drag = { id: it.id, offX: start.xr - it.xr, offY: start.yr - it.yr, wrap };
+      wrap.setPointerCapture(event.pointerId);
+      bindAnnMove(wrap, event.pointerId);
+      renderAnnTools();
+      renderAnnPages();
+    } else {
+      ann.selected = null;
+      renderAnnTools();
+      renderAnnPages();
+    }
+    return;
+  }
+
+  event.preventDefault();
+  const p = annRelative(event, wrap);
+  if (ann.tool === 'text') {
+    const text = prompt('Texto a escribir:');
+    if (text && text.trim()) {
+      ann.items.push({ id: ann.nextId++, page: pageIndex, type: 'text', xr: p.xr, yr: p.yr, size: 0.025, color: ann.color, text: text.trim() });
+      renderAnnPages();
+    }
+    return;
+  }
+  if (ann.tool === 'draw') {
+    ann.draft = { id: ann.nextId++, page: pageIndex, type: 'draw', color: ann.color, points: [[p.xr, p.yr]], wrap };
+  } else {
+    ann.draft = { id: ann.nextId++, page: pageIndex, type: ann.tool, xr: p.xr, yr: p.yr, wr: 0, hr: 0, color: ann.color, startX: p.xr, startY: p.yr, wrap };
+  }
+  wrap.setPointerCapture(event.pointerId);
+  bindAnnMove(wrap, event.pointerId);
+}
+
+function bindAnnMove(wrap, pointerId) {
+  const move = (e) => annPointerMove(e, wrap);
+  const up = (e) => {
+    wrap.releasePointerCapture(e.pointerId);
+    wrap.removeEventListener('pointermove', move);
+    wrap.removeEventListener('pointerup', up);
+    wrap.removeEventListener('pointercancel', up);
+    annPointerUp();
+  };
+  wrap.addEventListener('pointermove', move);
+  wrap.addEventListener('pointerup', up);
+  wrap.addEventListener('pointercancel', up);
+}
+
+function annPointerMove(event, wrap) {
+  const p = annRelative(event, wrap);
+  if (ann.drag) {
+    const it = ann.items.find((i) => i.id === ann.drag.id);
+    if (it) {
+      it.xr = clamp01(p.xr - ann.drag.offX);
+      it.yr = clamp01(p.yr - ann.drag.offY);
+      renderAnnPages();
+    }
+    return;
+  }
+  if (!ann.draft) return;
+  if (ann.draft.type === 'draw') {
+    ann.draft.points.push([p.xr, p.yr]);
+  } else {
+    ann.draft.xr = Math.min(ann.draft.startX, p.xr);
+    ann.draft.yr = Math.min(ann.draft.startY, p.yr);
+    ann.draft.wr = Math.abs(p.xr - ann.draft.startX);
+    ann.draft.hr = Math.abs(p.yr - ann.draft.startY);
+  }
+  drawAnnDraft();
+}
+
+/** Dibuja el borrador en curso en la capa de su página. */
+function drawAnnDraft() {
+  const layer = el.annPages.querySelector(`.ann-page[data-page="${ann.draft.page}"] .ann-layer`);
+  if (!layer) return;
+  renderAnnItems(layer, ann.draft.page);
+  const d = ann.draft;
+  const node = document.createElement('div');
+  if (d.type === 'draw') {
+    node.className = 'ann-item ann-draw';
+    node.style.cssText = 'left:0;top:0;width:100%;height:100%';
+    const pts = d.points.map(([x, y]) => `${x * 100},${y * 100}`).join(' ');
+    node.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${d.color}" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+  } else {
+    node.className = `ann-item ann-${d.type}`;
+    node.style.left = `${d.xr * 100}%`;
+    node.style.top = `${d.yr * 100}%`;
+    node.style.width = `${d.wr * 100}%`;
+    node.style.height = `${d.hr * 100}%`;
+    node.style.background = d.color;
+  }
+  layer.append(node);
+}
+
+function annPointerUp() {
+  if (ann.drag) {
+    ann.drag = null;
+    return;
+  }
+  const d = ann.draft;
+  ann.draft = null;
+  if (!d) return;
+  if (d.type === 'draw') {
+    if (d.points.length > 1) ann.items.push({ id: d.id, page: d.page, type: 'draw', color: d.color, points: d.points });
+  } else if (d.wr > 0.01 && d.hr > 0.01) {
+    ann.items.push({ id: d.id, page: d.page, type: d.type, xr: d.xr, yr: d.yr, wr: d.wr, hr: d.hr, color: d.color });
+  }
+  renderAnnPages();
+}
+
+function deleteAnnSelected() {
+  ann.items = ann.items.filter((i) => i.id !== ann.selected);
+  ann.selected = null;
+  renderAnnTools();
+  renderAnnPages();
+}
+
+async function saveAnnotations() {
+  if (!ann.items.length) return toast('No hay anotaciones que guardar.');
+  busy('Guardando anotaciones…');
+  try {
+    const edit = await import('./pdfedit.js');
+    const blob = await edit.applyAnnotations(ann.sourceBlob, ann.items);
+    const doc = await saveNewPdf(blob, `${ann.doc.name} (anotado)`);
+    closeAnnotate();
+    renderLibrary();
+    processQueue();
+    openViewer(doc);
+    toast('PDF anotado guardado como copia nueva.');
+  } catch (error) {
+    toast(`No se pudo guardar: ${error.message}`);
+  } finally {
+    busy(null);
+  }
 }
 
 function uploadLocalDocs() {
@@ -1834,6 +2143,13 @@ function setup() {
     closeOrganize();
   });
   el.orgSave.addEventListener('click', saveOrganized);
+
+  // Anotar / firmar
+  el.annCancel.addEventListener('click', () => {
+    if (ann?.items.length && !confirm('¿Descartar las anotaciones?')) return;
+    closeAnnotate();
+  });
+  el.annSave.addEventListener('click', saveAnnotations);
 
   // Nuevo PDF
   el.editorCancel.addEventListener('click', cancelDraft);

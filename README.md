@@ -26,6 +26,8 @@ pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblio
 - **Combinar PDF** (menú **+**): une varios PDF de tu biblioteca (o importados) en uno, en el orden que elijas.
 - **Organizar páginas** (visor › **⋯**): selecciona páginas para girar, eliminar o extraer a un PDF nuevo;
   arrastra ⠿ para reordenar; **Insertar** agrega páginas de otro PDF; **Dividir** crea un PDF por página.
+- **Anotar / firmar** (visor › **⋯**): agregar texto, tapar un área (recuadro opaco), resaltar y firmar
+  o dibujar a mano alzada; elige el color; mueve o borra cada anotación.
   El resultado se guarda como copia nueva; el original no se modifica.
 - **Sin conexión**: puedes seguir escaneando; los PDF quedan pendientes y se suben solos al volver la conexión.
 
