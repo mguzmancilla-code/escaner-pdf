@@ -801,7 +801,7 @@ function makePage(file, fromCamera) {
     file,
     corners: FULL_FRAME,
     rotation: 0,
-    filter: fromCamera ? 'enhanced' : 'original',
+    filter: fromCamera ? 'sharp' : 'original',
     processed: null,
     width: 0,
     height: 0,

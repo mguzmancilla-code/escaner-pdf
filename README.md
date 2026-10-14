@@ -11,7 +11,7 @@ además en tu biblioteca privada en la nube (Supabase), organizados en carpetas.
 3. Ábrela desde el icono **Escáner PDF**: se ve a pantalla completa, como una app.
 
 ## Uso
-- **Escanear**: haz la foto → la app detecta los bordes de la hoja (puedes ajustar las 4 esquinas con lupa) → pestaña **Resultado** para el filtro (Original, Mejorado, Grises, B/N) y el giro → **Listo** o **Listo y escanear otra**.
+- **Escanear**: haz la foto → la app detecta los bordes de la hoja (puedes ajustar las 4 esquinas con lupa) → pestaña **Resultado** para el filtro (Original, Nítido, Grises, Blanco y negro) y el giro → **Listo** o **Listo y escanear otra**.
 - **Imágenes**: elige varias fotos o archivos a la vez; se agregan como páginas.
 - Toca una página para editarla o cambiarla de posición (‹ ›).
 - **Calidad del PDF**: tamaño A4 / Carta / Oficio / ajustado a la imagen, márgenes y calidad (Máxima, Alta ≈300 ppp, Media, Compacta).

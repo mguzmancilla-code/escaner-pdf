@@ -384,10 +384,74 @@ function warpPerspective(src, quad) {
 
 export const FILTERS = [
   { id: 'original', label: 'Original' },
-  { id: 'enhanced', label: 'Mejorado' },
+  { id: 'sharp', label: 'Nítido' },
   { id: 'grayscale', label: 'Grises' },
-  { id: 'bw', label: 'B/N' },
+  { id: 'bw', label: 'Blanco y negro' },
 ];
+
+// Curva de alto contraste para «Blanco y negro»: lleva el fondo del papel a
+// blanco y el texto a negro, con una transición suave para no romper los
+// trazos finos (números, acentos). Precalculada como tabla de 256 valores.
+const BW_CURVE = (() => {
+  const lut = new Uint8ClampedArray(256);
+  const center = 178;
+  const slope = 0.075;
+  for (let v = 0; v < 256; v++) lut[v] = 255 / (1 + Math.exp(-slope * (v - center)));
+  return lut;
+})();
+
+/**
+ * Realce de nitidez (unsharp mask) sobre la luminancia, modificando los píxeles
+ * en el sitio. Hace legible el texto fino sin alterar los colores. Usa una
+ * ventana deslizante de pocas filas: la memoria no depende del alto de la foto.
+ */
+function sharpen(d, w, h, amount) {
+  const r = clamp(Math.round(Math.max(w, h) / 2200), 1, 2);
+  const win = 2 * r + 1;
+  const rawLuma = Array.from({ length: win }, () => new Float32Array(w));
+  const blurH = Array.from({ length: win }, () => new Float32Array(w));
+
+  // Carga una fila: calcula su luminancia y su desenfoque horizontal (box).
+  const loadRow = (y) => {
+    const slot = y % win;
+    const raw = rawLuma[slot];
+    const bh = blurH[slot];
+    for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
+      raw[x] = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    }
+    let sum = 0;
+    for (let x = 0; x <= r && x < w; x++) sum += raw[x];
+    let count = Math.min(r + 1, w);
+    for (let x = 0; x < w; x++) {
+      bh[x] = sum / count;
+      const add = x + r + 1;
+      const rem = x - r;
+      if (add < w) { sum += raw[add]; count++; }
+      if (rem >= 0) { sum -= raw[rem]; count--; }
+    }
+  };
+
+  for (let y = 0; y < r && y < h; y++) loadRow(y);
+
+  for (let y = 0; y < h; y++) {
+    if (y + r < h) loadRow(y + r);
+    const raw = rawLuma[y % win];
+    for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
+      let sum = 0;
+      let count = 0;
+      for (let k = -r; k <= r; k++) {
+        const yy = y + k;
+        if (yy < 0 || yy >= h) continue;
+        sum += blurH[yy % win][x];
+        count++;
+      }
+      const detail = amount * (raw[x] - sum / count); // diferencia con el desenfoque
+      d[i] = clamp(d[i] + detail, 0, 255);
+      d[i + 1] = clamp(d[i + 1] + detail, 0, 255);
+      d[i + 2] = clamp(d[i + 2] + detail, 0, 255);
+    }
+  }
+}
 
 /**
  * Estima la iluminación del papel (percentil 90 de brillo por celdas) para
@@ -481,21 +545,33 @@ function applyFilter(imageData, filter) {
 
     for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
       const bg = Math.max(80, row[gx0[x]] * (1 - tx[x]) + row[gx1[x]] * tx[x]);
-      const k = 255 / bg;
+      const k = 255 / bg; // normaliza el fondo del papel a blanco y quita sombras
       const r = d[i] * k;
       const g = d[i + 1] * k;
       const b = d[i + 2] * k;
-      if (filter === 'enhanced') {
-        // Papel blanco, colores algo más vivos y texto más negro.
+      if (filter === 'sharp') {
+        // Papel blanco, colores algo más vivos y texto más marcado (la nitidez va después).
         const l = r * 0.299 + g * 0.587 + b * 0.114;
-        d[i] = (l + (r - l) * 1.2 - 128) * 1.1 + 128;
-        d[i + 1] = (l + (g - l) * 1.2 - 128) * 1.1 + 128;
-        d[i + 2] = (l + (b - l) * 1.2 - 128) * 1.1 + 128;
+        d[i] = (l + (r - l) * 1.25 - 128) * 1.18 + 128;
+        d[i + 1] = (l + (g - l) * 1.25 - 128) * 1.18 + 128;
+        d[i + 2] = (l + (b - l) * 1.25 - 128) * 1.18 + 128;
       } else {
+        // Grises y Blanco y negro: se normaliza a gris; el contraste duro del B/N
+        // se aplica al final, después de realzar la nitidez.
         const l = r * 0.299 + g * 0.587 + b * 0.114;
-        const v = filter === 'grayscale' ? (l - 25) * 1.16 : (l - 110) * 2.43;
-        d[i] = d[i + 1] = d[i + 2] = v;
+        d[i] = d[i + 1] = d[i + 2] = filter === 'grayscale' ? (l - 20) * 1.14 : l;
       }
+    }
+  }
+
+  // Realce de nitidez: el paso que más mejora la legibilidad del texto fino.
+  if (filter === 'sharp') sharpen(d, w, h, 0.9);
+  else if (filter === 'grayscale') sharpen(d, w, h, 0.8);
+  else if (filter === 'bw') {
+    sharpen(d, w, h, 1.1);
+    for (let i = 0; i < d.length; i += 4) {
+      const v = BW_CURVE[clamp(d[i], 0, 255) | 0];
+      d[i] = d[i + 1] = d[i + 2] = v;
     }
   }
 }
