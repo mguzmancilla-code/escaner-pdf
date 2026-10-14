@@ -172,7 +172,12 @@
   </section>
 
   <div id="busy" class="busy" hidden>
-    <div class="busy-card"><div class="spinner"></div><p id="busyText"></p></div>
+    <div class="busy-card">
+      <div id="busySpinner" class="spinner"></div>
+      <p id="busyText"></p>
+      <div id="busyBar" class="progress-bar" hidden><span id="busyBarFill"></span></div>
+      <p id="busySub" class="busy-sub"></p>
+    </div>
   </div>
   <div id="toast" class="toast" role="status" hidden></div>
 

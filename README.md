@@ -16,7 +16,9 @@ además en tu biblioteca privada en la nube (Supabase), organizados en carpetas.
 - Toca una página para editarla o cambiarla de posición (‹ ›).
 - **Calidad del PDF**: tamaño A4 / Carta / Oficio / ajustado a la imagen, márgenes y calidad (Máxima, Alta ≈300 ppp, Media, Compacta).
 - **Compartir / Guardar**: abre la hoja de compartir de iOS → *Guardar en Archivos*, WhatsApp, Mail, Google Drive, Imprimir, etc.
-- Botón **+** (arriba a la derecha): **Nueva carpeta** o **Importar PDF** que ya tengas en Archivos.
+- Botón **+** (arriba a la derecha): **Nueva carpeta** o **Importar PDF** (varios a la vez) desde Archivos.
+- **Importación masiva**: al importar, eliges la carpeta de destino y ves el progreso. De cada PDF se
+  extrae el texto; los que no tienen texto (escaneos) quedan marcados como pendientes de OCR.
 - **Cuenta** (ícono de persona, arriba a la izquierda): entra con tu correo y contraseña para usar la nube.
 - **Carpetas**: toca una carpeta para entrar; el botón **⋯** permite renombrarla o eliminarla
   (sus documentos no se borran: pasan a «Mis PDF»). En el visor, el botón de carpeta **mueve** el PDF.
@@ -31,6 +33,8 @@ styles.css            Estilos (modo claro y oscuro)
 js/app.js             Pantallas y flujo
 js/imaging.js         Detección de bordes, perspectiva, filtros y giros
 js/pdf.js             Generador de PDF (JPEG incrustado sin recomprimir)
+js/pdftext.js         Lectura de PDF con pdf.js: texto y vista previa de páginas
+js/vendor/pdfjs/      Librería pdf.js (incluida para funcionar sin conexión)
 js/db.js              Almacenamiento local (IndexedDB)
 js/auth.js            Cuenta: inicio de sesión con Supabase
 js/cloud.js           Biblioteca en la nube: carpetas, subida, descarga

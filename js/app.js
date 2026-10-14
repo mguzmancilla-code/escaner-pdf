@@ -57,7 +57,8 @@ for (const id of [
   'previewImg', 'peSpinner', 'loupe', 'cropControls', 'filterControls', 'filterSeg', 'autoBtn', 'fullBtn',
   'peDelete', 'peRotL', 'peRotR', 'peMoveL', 'peMoveR', 'peNextWrap', 'peNext',
   'viewer', 'viewerBack', 'viewerTitle', 'viewerRename', 'viewerPages', 'shareBtn', 'downloadBtn', 'deleteBtn',
-  'busy', 'busyText', 'toast', 'cameraInput', 'imagesInput', 'pdfInput',
+  'busy', 'busyText', 'busySpinner', 'busyBar', 'busyBarFill', 'busySub', 'toast',
+  'cameraInput', 'imagesInput', 'pdfInput',
 ]) el[id] = $(id);
 
 const state = {
@@ -113,10 +114,22 @@ function toast(message) {
   toastTimer = setTimeout(() => (el.toast.hidden = true), 2800);
 }
 
-function busy(message) {
+/**
+ * Indicador de espera. Con `fraction` (0–1) muestra una barra de progreso en
+ * lugar del círculo girando; `sub` es una línea secundaria (p. ej. «Página 2 de 5»).
+ */
+function busy(message, { fraction = null, sub = '' } = {}) {
   el.busy.hidden = !message;
-  if (message) el.busyText.textContent = message;
+  if (!message) return;
+  el.busyText.textContent = message;
+  const bar = fraction != null;
+  el.busySpinner.hidden = bar;
+  el.busyBar.hidden = !bar;
+  el.busySub.textContent = sub;
+  if (bar) el.busyBarFill.style.width = `${Math.round(clamp01(fraction) * 100)}%`;
 }
+
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 function show(screen) {
   for (const name of ['library', 'editor', 'viewer']) el[name].hidden = name !== screen;
@@ -351,20 +364,27 @@ function folderMenu(folder) {
  * Menú de opciones que sube desde abajo. Cada acción se ejecuta dentro del
  * mismo toque, así iOS permite abrir selectores de archivos desde ella.
  */
-function chooseAction(title, options) {
+function chooseAction(title, options, onCancel) {
   const sheet = document.createElement('div');
   sheet.className = 'action-sheet';
   sheet.innerHTML = '<div class="action-card"><p class="action-title"></p><div class="action-list"></div></div>';
   sheet.querySelector('.action-title').textContent = title;
-  const close = () => sheet.remove();
+  const close = (cancelled) => {
+    sheet.remove();
+    if (cancelled) onCancel?.();
+  };
   for (const option of options) {
     const button = document.createElement('button');
-    button.className = `action-item${option.danger ? ' danger' : ''}${option.current ? ' current' : ''}`;
+    const classes = ['action-item'];
+    if (option.danger) classes.push('danger');
+    if (option.current) classes.push('current'); // deshabilitada, marca «(actual)»
+    if (option.selected) classes.push('selected'); // resaltada pero elegible
+    button.className = classes.join(' ');
     button.textContent = option.label;
     if (option.depth) button.style.paddingLeft = `${16 + option.depth * 18}px`;
     button.disabled = Boolean(option.current);
     button.addEventListener('click', () => {
-      close();
+      close(false);
       option.run();
     });
     sheet.querySelector('.action-list').append(button);
@@ -372,10 +392,28 @@ function chooseAction(title, options) {
   const cancel = document.createElement('button');
   cancel.className = 'action-cancel';
   cancel.textContent = 'Cancelar';
-  cancel.addEventListener('click', close);
+  cancel.addEventListener('click', () => close(true));
   sheet.append(cancel);
-  sheet.addEventListener('click', (event) => event.target === sheet && close());
+  sheet.addEventListener('click', (event) => event.target === sheet && close(true));
   document.body.append(sheet);
+}
+
+const CANCELADO = Symbol('cancelado');
+
+/** Menú para elegir una carpeta de destino. Resuelve con el id, null (raíz) o CANCELADO. */
+function chooseFolder(title, currentId) {
+  return new Promise((resolve) => {
+    const options = [
+      { label: 'Mis PDF', selected: currentId == null, run: () => resolve(null) },
+      ...folderTree().map(({ folder, depth }) => ({
+        label: folder.nombre,
+        depth: depth + 1,
+        selected: folder.id === currentId,
+        run: () => resolve(folder.id),
+      })),
+    ];
+    chooseAction(title, options, () => resolve(CANCELADO));
+  });
 }
 
 function addMenu() {
@@ -611,20 +649,55 @@ async function openViewer(doc) {
       }),
     );
   } else {
-    // PDF importado o descargado de la nube: todavía no hay imágenes de todas las páginas.
-    const url = URL.createObjectURL(doc.pdf);
-    const thumb = doc.thumb ? URL.createObjectURL(doc.thumb) : null;
-    viewerUrls = thumb ? [url, thumb] : [url];
-    el.viewerPages.innerHTML = `
-      <div class="viewer-note">
-        ${thumb ? `<img class="viewer-thumb" alt="Primera página" src="${thumb}">` : ''}
-        <p>${pagesText(doc.pageCount)} · ${formatSize(doc.size)}</p>
-        <p>La vista previa de todas las páginas llegará en una próxima actualización.</p>
-        <a class="btn" href="${url}" target="_blank" rel="noopener">${icon('doc')}Abrir PDF</a>
-      </div>`;
+    // PDF importado o descargado: se renderizan sus páginas con pdf.js y se
+    // guardan en el iPhone para que la próxima vez se abra al instante.
+    const blobs = await renderPdfPreviews(doc);
+    if (blobs?.length) {
+      viewerUrls = blobs.map((blob) => URL.createObjectURL(blob));
+      el.viewerPages.replaceChildren(
+        ...viewerUrls.map((url, i) => {
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = `Página ${i + 1}`;
+          img.loading = 'lazy';
+          return img;
+        }),
+      );
+    } else {
+      // Respaldo si no se pudo renderizar (p. ej. sin pdf.js disponible).
+      const url = URL.createObjectURL(doc.pdf);
+      const thumb = doc.thumb ? URL.createObjectURL(doc.thumb) : null;
+      viewerUrls = thumb ? [url, thumb] : [url];
+      el.viewerPages.innerHTML = `
+        <div class="viewer-note">
+          ${thumb ? `<img class="viewer-thumb" alt="Primera página" src="${thumb}">` : ''}
+          <p>${pagesText(doc.pageCount)} · ${formatSize(doc.size)}</p>
+          <p>No se pudo generar la vista previa. Puedes abrir el PDF directamente.</p>
+          <a class="btn" href="${url}" target="_blank" rel="noopener">${icon('doc')}Abrir PDF</a>
+        </div>`;
+    }
   }
   el.viewerPages.scrollTop = 0;
   show('viewer');
+}
+
+/** Genera (y cachea) las imágenes de las páginas de un PDF con pdf.js. */
+async function renderPdfPreviews(doc) {
+  busy('Abriendo documento…', { fraction: 0 });
+  try {
+    const pdftext = await import('./pdftext.js');
+    const blobs = await pdftext.renderPdfPages(doc.pdf, 1400, (n, total) =>
+      busy('Abriendo documento…', { fraction: n / total, sub: `Página ${n} de ${total}` }),
+    );
+    const updated = await updateDoc(doc.id, { previews: blobs });
+    if (updated) state.current = updated;
+    return blobs;
+  } catch (error) {
+    console.warn('No se pudo renderizar el PDF:', error.message);
+    return null;
+  } finally {
+    busy(null);
+  }
 }
 
 function closeViewerImages() {
@@ -707,42 +780,91 @@ async function deleteCurrent() {
 }
 
 async function importPdfs(files) {
-  let imported = 0;
-  busy('Importando PDF…');
+  // Elegir carpeta de destino (si hay sesión y existen carpetas).
+  let destino = signedIn() ? state.folderId : null;
+  if (signedIn() && state.folders.length) {
+    destino = await chooseFolder(
+      files.length === 1 ? 'Importar en…' : `Importar ${files.length} PDF en…`,
+      state.folderId,
+    );
+    if (destino === CANCELADO) return;
+  }
+
+  let pdftext = null;
   try {
-    for (const file of files) {
+    pdftext = await import('./pdftext.js');
+  } catch {
+    // Sin pdf.js (p. ej. sin conexión la primera vez) se importa sin extraer texto.
+  }
+
+  const total = files.length;
+  let imported = 0;
+  let needOcr = 0;
+  const errores = [];
+
+  for (const [index, file] of [...files].entries()) {
+    const head = total === 1 ? 'Importando PDF…' : `Importando ${index + 1} de ${total}…`;
+    busy(head, { fraction: index / total, sub: file.name });
+    try {
       const buffer = await file.arrayBuffer();
-      const text = new TextDecoder('latin1').decode(buffer);
-      if (!text.startsWith('%PDF')) {
-        toast(`«${file.name}» no es un PDF válido.`);
+      const raw = new TextDecoder('latin1').decode(buffer.slice(0, 4));
+      if (raw !== '%PDF') {
+        errores.push(`«${file.name}» no es un PDF válido.`);
         continue;
       }
-      const pageCount = (text.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length || 1;
+      const blob = new Blob([buffer], { type: 'application/pdf' });
+
+      let pageCount = 0;
+      let textoOcr = null;
+      let thumb = null;
+      if (pdftext) {
+        const info = await pdftext.prepareImport(blob, (n, tot) =>
+          busy(head, { fraction: (index + n / tot) / total, sub: `${file.name} · página ${n} de ${tot}` }),
+        );
+        pageCount = info.pageCount;
+        thumb = info.thumb;
+        // Si el PDF ya trae texto real, queda listo para buscar; si no, pendiente de OCR.
+        const util = info.text.replace(/\s/g, '').length;
+        if (util >= Math.max(16, info.pageCount * 8)) textoOcr = info.text;
+      } else {
+        // Respaldo sin pdf.js: contar páginas de forma aproximada.
+        const marks = new TextDecoder('latin1').decode(buffer).match(/\/Type\s*\/Page(?![a-zA-Z])/g);
+        pageCount = marks ? marks.length : 1;
+      }
+
+      const esCamScanner = /CamScanner/i.test(new TextDecoder('latin1').decode(buffer.slice(0, 2048)));
+      if (!textoOcr) needOcr++;
       const doc = {
         id: uid(),
         name: sanitizeName(file.name) || 'Documento',
         created: Date.now(),
         size: file.size,
         pageCount,
-        pdf: new Blob([buffer], { type: 'application/pdf' }),
-        thumb: null,
+        pdf: blob,
+        thumb,
         previews: null,
-        // CamScanner deja su nombre en los metadatos del PDF (Producer/Creator).
-        origen: /CamScanner/i.test(text) ? 'camscanner' : 'importado',
-        estadoOcr: 'pendiente', // en la fase 2 se revisará si ya trae texto
+        origen: esCamScanner ? 'camscanner' : 'importado',
+        textoOcr,
+        estadoOcr: textoOcr ? 'completado' : 'pendiente',
         ...newDocOwnership(),
+        carpetaId: destino,
       };
       await saveDoc(doc);
       state.docs.push(doc);
       imported++;
+    } catch (error) {
+      errores.push(`«${file.name}»: ${error.message}`);
     }
-  } catch (error) {
-    toast(`No se pudo importar: ${error.message}`);
-  } finally {
-    busy(null);
   }
+
+  busy(null);
   renderLibrary();
-  if (imported) toast(imported === 1 ? 'PDF importado' : `${imported} PDF importados`);
+  if (imported) {
+    let msg = imported === 1 ? 'PDF importado' : `${imported} PDF importados`;
+    if (needOcr) msg += needOcr === 1 ? ' · 1 sin texto (pendiente de OCR)' : ` · ${needOcr} sin texto (pendientes de OCR)`;
+    toast(msg);
+  }
+  if (errores.length) toast(errores[0]);
   processQueue();
 }
 

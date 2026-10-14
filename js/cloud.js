@@ -110,6 +110,7 @@ export async function uploadDocument(doc) {
     carpeta_id: doc.carpetaId ?? null,
     origen: doc.origen ?? 'app',
     estado_ocr: doc.estadoOcr ?? 'pendiente',
+    texto_ocr: doc.textoOcr ?? null, // texto extraído del PDF (o del OCR en la fase 4)
     paginas: doc.pageCount ?? null,
     version_actual: 1,
     miniatura_path: thumbPath,

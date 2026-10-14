@@ -330,3 +330,12 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .action-item.current::after { content: " (actual)"; }
 .action-cancel { width: 100%; padding: 15px; font-size: 17px; font-weight: 600; color: var(--accent); }
 @keyframes fade-in { from { opacity: 0; } }
+
+/* ---------- Barra de progreso e importación ---------- */
+
+.progress-bar { width: 180px; max-width: 60vw; height: 8px; margin: 14px auto 0; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.progress-bar span { display: block; height: 100%; width: 0; border-radius: 4px; background: var(--accent); transition: width 0.2s ease; }
+.busy-sub { margin: 8px 0 0; font-size: 13px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
+.busy-sub:empty { display: none; }
+.action-item.selected { font-weight: 600; }
+.action-item.selected::after { content: " ✓"; color: var(--accent); }
