@@ -447,3 +447,8 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .ann-chip.active { border-color: var(--text); }
 .ann-image { pointer-events: auto; }
 .ann-image img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+
+/* Timbre (sello con datos y folio) en Anotar */
+.ann-stamp { border: 2px solid; border-radius: 3px; background: rgba(255, 255, 255, 0.85); display: flex; flex-direction: column; justify-content: center; padding: 1% 2.5%; overflow: hidden; pointer-events: auto; box-sizing: border-box; line-height: 1.2; }
+.ann-stamp-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ann-stamp-line.head { font-weight: 700; }

@@ -53,6 +53,7 @@ const ICONS = {
   marker: '<path d="M4 20h16M6 16l8-8 4 4-8 8H6z"/>',
   redactbox: '<rect x="4" y="6" width="16" height="12" rx="1" fill="currentColor"/>',
   signature: '<path d="M4 17c3 0 3-10 6-10s0 10 3 10 2-6 4-6 2 2 3 2"/>',
+  stamp: '<rect x="5" y="14" width="14" height="6" rx="1"/><path d="M12 14V9M9 4h6a2 2 0 0 1 2 2c0 2-2 2-2 3H9c0-1-2-1-2-3a2 2 0 0 1 2-2z"/>',
 };
 
 const icon = (name) =>
@@ -1033,14 +1034,29 @@ const ANN_TOOLS = [
   { id: 'redact', icon: 'redactbox', label: 'Tapar' },
   { id: 'highlight', icon: 'marker', label: 'Resaltar' },
   { id: 'draw', icon: 'signature', label: 'Firmar' },
+  { id: 'stamp', icon: 'stamp', label: 'Timbre' },
 ];
 const ANN_HINTS = {
   select: 'Toca una anotación para seleccionarla; arrástrala para moverla.',
   text: 'Toca donde quieras escribir.',
   redact: 'Arrastra para tapar un área (recuadro opaco).',
   highlight: 'Arrastra para resaltar (color translúcido).',
-  draw: 'Arrastra para firmar o dibujar a mano alzada.',
+  draw: 'Arrastra para firmar o dibujar a mano alzada. También puedes importar una firma.',
+  stamp: 'Toca donde quieras poner el timbre con tus datos y un folio.',
 };
+
+function generarFolio() {
+  const d = new Date();
+  const p = (v) => String(v).padStart(2, '0');
+  const fecha = `${String(d.getFullYear()).slice(2)}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+  const rnd = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${fecha}-${rnd}`;
+}
+
+function fechaLegible(d) {
+  const p = (v) => String(v).padStart(2, '0');
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 let ann = null; // { doc, sourceBlob, pages, items, tool, color, selected, draft, drag }
 
@@ -1250,6 +1266,22 @@ function renderAnnItems(layer, pageIndex) {
       node.style.width = `${it.wr * 100}%`;
       node.style.height = `${it.hr * 100}%`;
       node.innerHTML = `<img alt="Firma" src="${it.dataUrl}">`;
+    } else if (it.type === 'stamp') {
+      node = document.createElement('div');
+      node.className = 'ann-item ann-stamp';
+      node.style.left = `${it.xr * 100}%`;
+      node.style.top = `${it.yr * 100}%`;
+      node.style.width = `${it.wr * 100}%`;
+      node.style.height = `${it.hr * 100}%`;
+      node.style.color = it.color;
+      node.style.borderColor = it.color;
+      node.style.fontSize = `${(it.hr / it.lines.length) * 62}cqh`;
+      for (const [i, linea] of it.lines.entries()) {
+        const row = document.createElement('div');
+        row.className = i === 0 ? 'ann-stamp-line head' : 'ann-stamp-line';
+        row.textContent = linea;
+        node.append(row);
+      }
     } else {
       node = document.createElement('div');
       node.className = `ann-item ann-${it.type}`;
@@ -1318,6 +1350,25 @@ function annPointerDown(event, pageIndex, wrap) {
     const text = prompt('Texto a escribir:');
     if (text && text.trim()) {
       ann.items.push({ id: ann.nextId++, page: pageIndex, type: 'text', xr: p.xr, yr: p.yr, size: 0.025, color: ann.color, text: text.trim() });
+      renderAnnPages();
+    }
+    return;
+  }
+  if (ann.tool === 'stamp') {
+    const nombre = prompt('Nombre o texto del timbre:', 'Firmado por ');
+    if (nombre && nombre.trim()) {
+      const lines = [nombre.trim(), `Fecha: ${fechaLegible(new Date())}`, `Folio: ${generarFolio()}`];
+      ann.items.push({
+        id: ann.nextId++,
+        page: pageIndex,
+        type: 'stamp',
+        xr: clamp01(p.xr - 0.17),
+        yr: clamp01(p.yr - 0.055),
+        wr: 0.34,
+        hr: 0.11,
+        color: ann.color,
+        lines,
+      });
       renderAnnPages();
     }
     return;

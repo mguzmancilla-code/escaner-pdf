@@ -26,9 +26,9 @@ pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblio
 - **Combinar PDF** (menú **+**): une varios PDF de tu biblioteca (o importados) en uno, en el orden que elijas.
 - **Organizar páginas** (visor › **⋯**): selecciona páginas para girar, eliminar o extraer a un PDF nuevo;
   arrastra ⠿ para reordenar; **Insertar** agrega páginas de otro PDF; **Dividir** crea un PDF por página.
-- **Anotar / firmar** (visor › **⋯**): agregar texto, tapar un área (recuadro opaco), resaltar y firmar
-  o dibujar a mano alzada; elige el color; mueve o borra cada anotación.
-  El resultado se guarda como copia nueva; el original no se modifica.
+- **Anotar / firmar** (visor › **⋯**): agregar texto, tapar (recuadro opaco), resaltar (translúcido),
+  firmar a mano alzada o **importar una firma** (imagen PNG), y poner un **timbre** con tus datos y un
+  folio único. Paleta de colores; mueve o borra cada anotación. Se guarda como copia nueva.
 - **Sin conexión**: puedes seguir escaneando; los PDF quedan pendientes y se suben solos al volver la conexión.
 
 > Sin sesión iniciada, los PDF quedan solo dentro de la app en este iPhone. Con sesión, también quedan en la nube.

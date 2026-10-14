@@ -108,6 +108,16 @@ const hexToRgb = (PDFLib, hex) => {
   return PDFLib.rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
 };
 
+// WinAnsi (Helvetica) no soporta todos los caracteres: se normaliza la
+// puntuación tipográfica común y el resto se sustituye por «?».
+const winAnsi = (texto) =>
+  (texto || '')
+    .replace(/[–—]/g, '-')
+    .replace(/[‘’‚]/g, "'")
+    .replace(/[“”„]/g, '"')
+    .replace(/…/g, '...')
+    .replace(/[^\x00-\xFF]/g, '?');
+
 /**
  * Dibuja anotaciones sobre un PDF y devuelve una copia nueva. Las coordenadas de
  * cada anotación son relativas (0–1) al alto/ancho de la página, con origen
@@ -144,18 +154,10 @@ export async function applyAnnotations(blob, items) {
       });
     } else if (it.type === 'text') {
       const size = (it.size || 0.02) * vista.h;
-      // WinAnsi (Helvetica) no soporta todos los caracteres: se normaliza la
-      // puntuación tipográfica común y el resto se sustituye por «?».
-      const texto = (it.text || '')
-        .replace(/[–—]/g, '-') // – —
-        .replace(/[‘’‚]/g, "'") // ' ' ‚
-        .replace(/[“”„]/g, '"') // " " „
-        .replace(/…/g, '...') // …
-        .replace(/[^\x00-\xFF]/g, '?');
       // La baseline queda `size` por debajo del borde superior de la caja.
       const baselineV = it.yr + size / vista.h;
       const [x, y] = toPdf(it.xr, baselineV);
-      page.drawText(texto, {
+      page.drawText(winAnsi(it.text), {
         x,
         y,
         size,
@@ -163,6 +165,39 @@ export async function applyAnnotations(blob, items) {
         color,
         lineHeight: size * 1.25,
         rotate: PDFLib.degrees(rot), // para que el texto se lea derecho en páginas giradas
+      });
+    } else if (it.type === 'stamp') {
+      const [sx0, sy0] = toPdf(it.xr, it.yr);
+      const [sx1, sy1] = toPdf(it.xr + it.wr, it.yr + it.hr);
+      const x = Math.min(sx0, sx1);
+      const y = Math.min(sy0, sy1);
+      const w = Math.abs(sx1 - sx0);
+      const h = Math.abs(sy1 - sy0);
+      page.drawRectangle({
+        x,
+        y,
+        width: w,
+        height: h,
+        color: PDFLib.rgb(1, 1, 1),
+        opacity: 0.85,
+        borderColor: color,
+        borderWidth: Math.max(0.8, Math.min(w, h) * 0.03),
+        borderOpacity: 1,
+      });
+      const lines = it.lines.map(winAnsi);
+      const pad = Math.min(w, h) * 0.12;
+      const innerW = w - 2 * pad;
+      const rowH = (h - 2 * pad) / lines.length;
+      let size = rowH * 0.72;
+      for (const ln of lines) {
+        while (size > 3 && font.widthOfTextAtSize(ln, size) > innerW) size -= 0.5;
+      }
+      // Para páginas giradas, cada línea se coloca por su esquina en coords de vista.
+      lines.forEach((ln, i) => {
+        const vy = it.yr + (pad + i * rowH + (rowH - size) / 2 + size) / vista.h;
+        const vx = it.xr + pad / vista.w;
+        const [lx, ly] = toPdf(vx, vy);
+        page.drawText(ln, { x: lx, y: ly, size, font, color, rotate: PDFLib.degrees(rot) });
       });
     } else if (it.type === 'image' && it.dataUrl) {
       const bytes = Uint8Array.from(atob(it.dataUrl.split(',')[1]), (c) => c.charCodeAt(0));
