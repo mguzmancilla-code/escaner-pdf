@@ -1096,7 +1096,7 @@ function closeAnnotate() {
   el.annotate.hidden = true;
 }
 
-const ANN_COLORS = ['#e5332a', '#1a4fd6', '#111111', '#2e7d32', '#ffe600', '#37d67a', '#2ccce4', '#ff6bb5', '#ff8c00'];
+const ANN_COLORS = ['#ffffff', '#e5332a', '#1a4fd6', '#111111', '#2e7d32', '#ffe600', '#37d67a', '#2ccce4', '#ff6bb5', '#ff8c00'];
 
 function setAnnColor(value) {
   ann.color = value;
@@ -1292,10 +1292,20 @@ function renderAnnItems(layer, pageIndex) {
       if (it.type === 'redact') node.style.background = it.color;
       if (it.type === 'highlight') node.style.background = it.color;
       if (it.type === 'draw') {
+        // El contenedor es el recuadro que ocupa el trazo, así se puede
+        // seleccionar y mover tocando sobre la firma.
         node.className = 'ann-item ann-draw';
-        node.style.left = node.style.top = '0';
-        node.style.width = node.style.height = '100%';
-        const pts = it.points.map(([x, y]) => `${x * 100},${y * 100}`).join(' ');
+        const xs = it.points.map((pt) => pt[0]);
+        const ys = it.points.map((pt) => pt[1]);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        const bw = Math.max(0.002, Math.max(...xs) - minX);
+        const bh = Math.max(0.002, Math.max(...ys) - minY);
+        node.style.left = `${minX * 100}%`;
+        node.style.top = `${minY * 100}%`;
+        node.style.width = `${bw * 100}%`;
+        node.style.height = `${bh * 100}%`;
+        const pts = it.points.map(([x, y]) => `${((x - minX) / bw) * 100},${((y - minY) / bh) * 100}`).join(' ');
         node.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${it.color}" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
       }
     }
@@ -1320,23 +1330,27 @@ function annRelative(event, wrap) {
   };
 }
 
+let annDragHandlers = null;
+
 function annPointerDown(event, pageIndex, wrap) {
   if (!ann) return;
-  const hitId = event.target.closest('.ann-item')?.dataset.id;
+  const hitNode = event.target.closest('.ann-item');
 
   if (ann.tool === 'select') {
-    if (hitId) {
-      ann.selected = Number(hitId);
-      const it = ann.items.find((i) => i.id === ann.selected);
+    if (hitNode) {
+      event.preventDefault();
+      const id = Number(hitNode.dataset.id);
+      ann.selected = id;
+      const it = ann.items.find((i) => i.id === id);
       const start = annRelative(event, wrap);
-      // Se arrastra actualizando solo la capa (no se recrea la página, para no
-      // perder el «pointer capture»).
-      ann.drag = { id: it.id, lastX: start.xr, lastY: start.yr, wrap, layer: wrap.querySelector('.ann-layer') };
-      wrap.setPointerCapture(event.pointerId);
-      bindAnnMove(wrap, event.pointerId);
-      markAnnSelected();
+      // Se guarda el nodo y se mueve directamente, sin recrearlo (recrearlo al
+      // iniciar cancelaba el gesto). Las escuchas van en window, no en el nodo.
+      ann.drag = { id, lastX: start.xr, lastY: start.yr, wrap, layer: wrap.querySelector('.ann-layer'), node: hitNode };
+      wrap.querySelectorAll('.ann-item.selected').forEach((n) => n.classList.remove('selected'));
+      hitNode.classList.add('selected');
       renderAnnTools();
-    } else {
+      startAnnWindowDrag();
+    } else if (ann.selected != null) {
       ann.selected = null;
       markAnnSelected();
       renderAnnTools();
@@ -1378,43 +1392,50 @@ function annPointerDown(event, pageIndex, wrap) {
   } else {
     ann.draft = { id: ann.nextId++, page: pageIndex, type: ann.tool, xr: p.xr, yr: p.yr, wr: 0, hr: 0, color: ann.color, startX: p.xr, startY: p.yr, wrap };
   }
-  wrap.setPointerCapture(event.pointerId);
-  bindAnnMove(wrap, event.pointerId);
+  startAnnWindowDrag();
 }
 
-function bindAnnMove(wrap, pointerId) {
-  const move = (e) => annPointerMove(e, wrap);
-  const up = (e) => {
-    wrap.releasePointerCapture(e.pointerId);
-    wrap.removeEventListener('pointermove', move);
-    wrap.removeEventListener('pointerup', up);
-    wrap.removeEventListener('pointercancel', up);
+function startAnnWindowDrag() {
+  if (annDragHandlers) return;
+  const move = (e) => annPointerMove(e);
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    annDragHandlers = null;
     annPointerUp();
   };
-  wrap.addEventListener('pointermove', move);
-  wrap.addEventListener('pointerup', up);
-  wrap.addEventListener('pointercancel', up);
+  annDragHandlers = { move, up };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
 }
 
-function annPointerMove(event, wrap) {
-  const p = annRelative(event, wrap);
+function annPointerMove(event) {
+  const ctx = ann?.drag || ann?.draft;
+  if (!ctx) return;
+  const p = annRelative(event, ctx.wrap);
   if (ann.drag) {
     const it = ann.items.find((i) => i.id === ann.drag.id);
-    if (it) {
-      const dx = p.xr - ann.drag.lastX;
-      const dy = p.yr - ann.drag.lastY;
-      ann.drag.lastX = p.xr;
-      ann.drag.lastY = p.yr;
-      if (it.type === 'draw') it.points = it.points.map(([x, y]) => [clamp01(x + dx), clamp01(y + dy)]);
-      else {
-        it.xr = clamp01(it.xr + dx);
-        it.yr = clamp01(it.yr + dy);
+    if (!it) return;
+    const dx = p.xr - ann.drag.lastX;
+    const dy = p.yr - ann.drag.lastY;
+    ann.drag.lastX = p.xr;
+    ann.drag.lastY = p.yr;
+    if (it.type === 'draw') {
+      it.points = it.points.map(([x, y]) => [clamp01(x + dx), clamp01(y + dy)]);
+      renderAnnItems(ann.drag.layer, it.page);
+      ann.drag.node = ann.drag.layer.querySelector(`.ann-item[data-id="${it.id}"]`);
+    } else {
+      it.xr = clamp01(it.xr + dx);
+      it.yr = clamp01(it.yr + dy);
+      if (ann.drag.node) {
+        ann.drag.node.style.left = `${it.xr * 100}%`;
+        ann.drag.node.style.top = `${it.yr * 100}%`;
       }
-      renderAnnItems(ann.drag.layer, it.page); // solo la capa; el wrap se mantiene
     }
     return;
   }
-  if (!ann.draft) return;
   if (ann.draft.type === 'draw') {
     ann.draft.points.push([p.xr, p.yr]);
   } else {
@@ -1452,6 +1473,7 @@ function drawAnnDraft() {
 function annPointerUp() {
   if (ann.drag) {
     ann.drag = null;
+    markAnnSelected();
     return;
   }
   const d = ann.draft;
