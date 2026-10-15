@@ -1075,6 +1075,7 @@ async function openAnnotate(doc) {
       items: [],
       tool: 'select',
       color: '#e5332a',
+      textSize: 0.025,
       selected: null,
       draft: null,
       drag: null,
@@ -1102,6 +1103,14 @@ function setAnnColor(value) {
   ann.color = value;
   const it = ann.selected && ann.items.find((i) => i.id === ann.selected);
   if (it) it.color = value;
+  renderAnnTools();
+  markAnnSelected();
+}
+
+function setAnnTextSize(value) {
+  ann.textSize = value;
+  const it = ann.selected && ann.items.find((i) => i.id === ann.selected && i.type === 'text');
+  if (it) it.size = value;
   renderAnnTools();
   markAnnSelected();
 }
@@ -1142,6 +1151,23 @@ function renderAnnTools() {
   palette.append(custom);
 
   const extras = [];
+  // Tamaño de letra (al escribir texto o con un texto seleccionado).
+  const selText = ann.selected && ann.items.find((i) => i.id === ann.selected && i.type === 'text');
+  if (ann.tool === 'text' || selText) {
+    const sizes = document.createElement('div');
+    sizes.className = 'ann-sizes';
+    for (const [label, value] of [['A', 0.016], ['A', 0.025], ['A', 0.038], ['A', 0.055]]) {
+      const b = document.createElement('button');
+      const current = selText ? selText.size : ann.textSize;
+      b.className = `ann-size${Math.abs(current - value) < 0.004 ? ' active' : ''}`;
+      b.textContent = label;
+      b.style.fontSize = `${10 + value * 260}px`;
+      b.title = `Tamaño ${Math.round(value * 1000)}`;
+      b.addEventListener('click', () => setAnnTextSize(value));
+      sizes.append(b);
+    }
+    extras.push(sizes);
+  }
   // Importar una imagen de firma (p. ej. PNG con fondo transparente).
   if (ann.tool === 'draw') {
     const imp = document.createElement('button');
@@ -1363,7 +1389,7 @@ function annPointerDown(event, pageIndex, wrap) {
   if (ann.tool === 'text') {
     const text = prompt('Texto a escribir:');
     if (text && text.trim()) {
-      ann.items.push({ id: ann.nextId++, page: pageIndex, type: 'text', xr: p.xr, yr: p.yr, size: 0.025, color: ann.color, text: text.trim() });
+      ann.items.push({ id: ann.nextId++, page: pageIndex, type: 'text', xr: p.xr, yr: p.yr, size: ann.textSize, color: ann.color, text: text.trim() });
       renderAnnPages();
     }
     return;

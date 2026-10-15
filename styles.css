@@ -471,3 +471,12 @@ svg.icon { width: 22px; height: 22px; flex: none; }
   .ann-hint { margin: 4px 14px 12px; }
   .ann-pages { flex: 1; min-width: 0; }
 }
+
+/* Control de tamaño de letra en Anotar */
+.ann-sizes { display: flex; align-items: center; gap: 2px; flex: none; }
+.ann-size { width: 34px; height: 38px; display: grid; place-items: center; border-radius: 8px; color: var(--text-2); line-height: 1; }
+.ann-size.active { background: var(--accent-soft); color: var(--accent); }
+@media (hover: hover) { .ann-size:hover { background: var(--surface-2); } }
+@media (min-width: 768px) {
+  .ann-side .ann-sizes { padding: 4px 12px; justify-content: flex-start; }
+}

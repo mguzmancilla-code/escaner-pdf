@@ -19,6 +19,9 @@ async function openPdf(data) {
     data: new Uint8Array(buffer),
     isEvalSupported: false, // más seguro y suficiente para leer/renderizar
     disableAutoFetch: true,
+    // Fuentes estándar (Helvetica, Times, etc.) para PDF que no las incrustan:
+    // sin esto, algunos PDF reales se renderizan en blanco.
+    standardFontDataUrl: new URL('./vendor/pdfjs/standard_fonts/', import.meta.url).href,
   }).promise;
 }
 
