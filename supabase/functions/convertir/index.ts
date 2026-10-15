@@ -79,8 +79,11 @@ Deno.serve(async (req) => {
         break;
       }
       if (estado.status === 'error') {
-        const fallido = estado.tasks.find((t: any) => t.status === 'error');
-        return json({ error: `CloudConvert: ${fallido?.message ?? 'conversión fallida'}` }, 502);
+        const errores = (estado.tasks ?? [])
+          .filter((t: any) => t.status === 'error')
+          .map((t: any) => `${t.operation}: ${t.message ?? t.code ?? '?'}`);
+        console.error('CloudConvert error:', JSON.stringify(estado.tasks));
+        return json({ error: `CloudConvert → ${errores.join(' || ') || 'conversión fallida'}` }, 502);
       }
     }
     if (!url) return json({ error: 'La conversión tardó demasiado. Intenta con un PDF más corto.' }, 504);
