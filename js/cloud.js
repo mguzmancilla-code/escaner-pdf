@@ -172,6 +172,15 @@ export async function convertHiFi(pdfBlob, formato) {
   const token = data?.session?.access_token;
   if (!token) throw new Error('Inicia sesión para convertir en la nube.');
 
+  // Normaliza la estructura del PDF: algunos conversores externos se caen con
+  // PDF generados por ciertos sistemas; reescribirlo suele solucionarlo.
+  try {
+    const edit = await import('./pdfedit.js');
+    pdfBlob = await edit.normalize(pdfBlob);
+  } catch {
+    /* si falla, se envía el PDF tal cual */
+  }
+
   // PDF → base64 (por tramos, para no desbordar la pila con archivos grandes).
   const bytes = new Uint8Array(await pdfBlob.arrayBuffer());
   let binario = '';

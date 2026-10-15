@@ -82,6 +82,15 @@ export async function pageCount(blob) {
   return (await loadDoc(PDFLib, blob)).getPageCount();
 }
 
+/** Reescribe la estructura del PDF (sin cambiar el contenido visible). Ayuda a
+ *  que conversores externos que se caen con ciertos PDF puedan procesarlo. */
+export async function normalize(blob) {
+  const PDFLib = await pdflib();
+  const doc = await loadDoc(PDFLib, blob);
+  doc.setProducer('Escaner PDF');
+  return asBlob(await doc.save({ useObjectStreams: false }));
+}
+
 /**
  * Convierte un punto relativo de la vista (ur, vr) ∈ [0,1], con origen
  * arriba-izquierda, a coordenadas PDF (puntos, origen abajo-izquierda) en una
