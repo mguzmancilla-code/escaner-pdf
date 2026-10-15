@@ -919,9 +919,59 @@ async function extractSelected() {
 }
 
 function insertPages() {
-  // Reutiliza el selector de archivos de PDF, en modo «insertar».
-  org.inserting = true;
-  el.pdfInput.click();
+  chooseAction('Insertar páginas desde…', [
+    {
+      label: 'Escanear con la cámara',
+      run: () => {
+        org.insertImages = 'camera';
+        el.cameraInput.click();
+      },
+    },
+    {
+      label: 'Fotos / Archivos',
+      run: () => {
+        org.insertImages = 'image';
+        el.imagesInput.click();
+      },
+    },
+    {
+      label: 'Otro PDF',
+      run: () => {
+        org.inserting = true;
+        el.pdfInput.click();
+      },
+    },
+  ]);
+}
+
+/** Convierte imágenes (fotos o escaneos) en páginas PDF y las inserta en la organización. */
+async function insertImageFiles(files, fromCamera) {
+  busy('Agregando páginas…', { fraction: 0 });
+  try {
+    const pdftext = await import('./pdftext.js');
+    for (const [idx, file] of [...files].entries()) {
+      busy('Agregando páginas…', { fraction: idx / files.length, sub: `Imagen ${idx + 1} de ${files.length}` });
+      const img = await loadImage(file);
+      // En cámara: detecta bordes y aplica el filtro nítido; en fotos, se usa la imagen completa.
+      const corners = fromCamera ? detectCorners(img) ?? FULL_FRAME : FULL_FRAME.map((p) => [...p]);
+      const canvas = renderPage(img, { corners, rotation: 0, filter: fromCamera ? 'sharp' : 'original' });
+      const w = canvas.width;
+      const h = canvas.height;
+      const jpeg = await canvasToBlob(canvas, 0.9);
+      releaseCanvas(canvas);
+      releaseImage(img);
+      const pageBlob = buildPdf([{ jpeg, width: w, height: h }], { pageSize: 'fit', title: 'página' });
+      const sourceId = String(org.nextSource++);
+      org.sources[sourceId] = pageBlob;
+      const thumbs = await pdftext.renderPdfPages(pageBlob, 500);
+      thumbs.forEach((tb, i) => org.pages.push({ source: sourceId, index: i, rotate: 0, url: URL.createObjectURL(tb) }));
+    }
+    renderOrganize();
+  } catch (error) {
+    toast(`No se pudieron agregar páginas: ${error.message}`);
+  } finally {
+    busy(null);
+  }
 }
 
 async function insertFromFiles(files) {
@@ -1044,6 +1094,16 @@ function finishDrag() {
 function toolsMenu() {
   const doc = state.current;
   const opciones = [{ label: 'Anotar / firmar', run: () => openAnnotate(doc) }];
+  if (signedIn() && doc.userId && ['pendiente', 'error'].includes(doc.sync)) {
+    opciones.push({
+      label: 'Subir a la nube ahora',
+      run: () => {
+        if (!navigator.onLine) return toast('Sin conexión. Se subirá cuando tengas internet.');
+        toast('Subiendo a la nube…');
+        syncNow();
+      },
+    });
+  }
   if (signedIn() && doc.estadoOcr === 'pendiente') {
     opciones.push({ label: 'Reconocer texto (OCR)', run: () => runOcrOn(doc) });
   }
@@ -2614,12 +2674,24 @@ function setup() {
   el.cameraInput.addEventListener('change', () => {
     const [file] = el.cameraInput.files;
     el.cameraInput.value = '';
-    if (file && state.draft) addFromCamera(file);
+    if (!file) return;
+    if (org?.insertImages) {
+      org.insertImages = null;
+      insertImageFiles([file], true);
+    } else if (state.draft) {
+      addFromCamera(file);
+    }
   });
   el.imagesInput.addEventListener('change', () => {
     const files = [...el.imagesInput.files];
     el.imagesInput.value = '';
-    if (files.length && state.draft) addFromLibrary(files);
+    if (!files.length) return;
+    if (org?.insertImages) {
+      org.insertImages = null;
+      insertImageFiles(files, false);
+    } else if (state.draft) {
+      addFromLibrary(files);
+    }
   });
   el.pdfInput.addEventListener('change', () => {
     const files = [...el.pdfInput.files];

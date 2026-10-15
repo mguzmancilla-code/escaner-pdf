@@ -25,7 +25,8 @@ pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblio
   (sus documentos no se borran: pasan a «Mis PDF»). En el visor, el botón de carpeta **mueve** el PDF.
 - **Combinar PDF** (menú **+**): une varios PDF de tu biblioteca (o importados) en uno, en el orden que elijas.
 - **Organizar páginas** (visor › **⋯**): selecciona páginas para girar, eliminar o extraer a un PDF nuevo;
-  arrastra ⠿ para reordenar; **Insertar** agrega páginas de otro PDF; **Dividir** crea un PDF por página.
+  arrastra ⠿ para reordenar; **Insertar** agrega páginas desde otro PDF, **fotos/archivos** o la **cámara**;
+  **Dividir** crea un PDF por página.
 - **Anotar / firmar** (visor › **⋯**): agregar texto, tapar (recuadro opaco), resaltar (translúcido),
   firmar a mano alzada o **importar una firma** (imagen PNG), y poner un **timbre** con tus datos y un
   folio único. Paleta de colores; mueve o borra cada anotación. Se guarda como copia nueva.
