@@ -2,6 +2,7 @@
 // Rutas en Storage: {user_id}/{documento_id}/v{n}.pdf y {user_id}/{documento_id}/miniatura.jpg
 
 import { getUser, supabase } from './auth.js';
+import { SUPABASE_KEY, SUPABASE_URL } from './config.js';
 
 const BUCKET = 'documentos';
 const storage = () => supabase.storage.from(BUCKET);
@@ -159,6 +160,47 @@ export async function deleteDocument(id) {
   const base = `${user.id}/${id}`;
   const { data: files } = await storage().list(base);
   if (files?.length) await storage().remove(files.map((file) => `${base}/${file.name}`));
+}
+
+/**
+ * Convierte un PDF a Word/Excel/PowerPoint con alta fidelidad llamando a la
+ * Edge Function «convertir» (que usa CloudConvert con la API key del servidor).
+ */
+export async function convertHiFi(pdfBlob, formato) {
+  requireUser();
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) throw new Error('Inicia sesión para convertir en la nube.');
+
+  // PDF → base64 (por tramos, para no desbordar la pila con archivos grandes).
+  const bytes = new Uint8Array(await pdfBlob.arrayBuffer());
+  let binario = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binario += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const pdfBase64 = btoa(binario);
+
+  let res;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/convertir`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ formato, pdfBase64 }),
+    });
+  } catch {
+    throw new Error('Sin conexión con el servidor de conversión.');
+  }
+  if (!res.ok) {
+    let msg = `Error ${res.status}`;
+    if (res.status === 404) msg = 'La función de conversión no está publicada todavía.';
+    else {
+      try {
+        msg = (await res.json()).error || msg;
+      } catch {
+        /* sin cuerpo JSON */
+      }
+    }
+    throw new Error(msg);
+  }
+  return res.blob();
 }
 
 export async function downloadFile(path) {

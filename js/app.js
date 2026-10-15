@@ -1090,12 +1090,43 @@ function exportToImages(doc) {
 // Convertir a Word / Excel / PowerPoint
 // ---------------------------------------------------------------------------
 
+const HIFI_TIPOS = {
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+
 function convertMenu(doc) {
-  chooseAction(`Convertir «${doc.name}»`, [
+  const opciones = [
     { label: 'Word (.docx) · texto editable', run: () => toWord(doc) },
     { label: 'Excel (.xlsx) · texto por filas', run: () => toExcel(doc) },
     { label: 'PowerPoint (.pptx) · páginas como imagen', run: () => toPptx(doc) },
-  ]);
+  ];
+  if (signedIn()) {
+    opciones.push(
+      { label: 'Word fiel · diseño idéntico (nube)', run: () => toHiFi(doc, 'docx') },
+      { label: 'Excel fiel · diseño idéntico (nube)', run: () => toHiFi(doc, 'xlsx') },
+      { label: 'PowerPoint fiel · diseño idéntico (nube)', run: () => toHiFi(doc, 'pptx') },
+    );
+  }
+  chooseAction(`Convertir «${doc.name}»`, opciones);
+}
+
+async function toHiFi(doc, formato) {
+  busy('Convirtiendo en la nube…');
+  try {
+    const blob = await pdfBlobOf(doc);
+    if (blob.size > 12 * 1024 * 1024) {
+      return toast('El PDF es muy grande para la conversión en la nube (máx. ~12 MB).');
+    }
+    const out = await cloud.convertHiFi(blob, formato);
+    await shareOrDownload(new File([out], `${sanitizeName(doc.name)}.${formato}`, { type: HIFI_TIPOS[formato] }));
+    toast('Conversión lista.');
+  } catch (error) {
+    toast(`No se pudo convertir: ${error.message}`);
+  } finally {
+    busy(null);
+  }
 }
 
 async function toWord(doc) {
