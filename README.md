@@ -29,6 +29,9 @@ pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblio
 - **Anotar / firmar** (visor › **⋯**): agregar texto, tapar (recuadro opaco), resaltar (translúcido),
   firmar a mano alzada o **importar una firma** (imagen PNG), y poner un **timbre** con tus datos y un
   folio único. Paleta de colores; mueve o borra cada anotación. Se guarda como copia nueva.
+- **Exportar a imagen** (visor › **⋯**): cada página a PNG o JPEG (varias páginas salen en un ZIP).
+- **Convertir** (visor › **⋯**): a Word (.docx, texto editable), Excel (.xlsx, texto por filas) o
+  PowerPoint (.pptx, cada página como imagen). Word/Excel trasladan el texto, no el diseño exacto.
 - **Sin conexión**: puedes seguir escaneando; los PDF quedan pendientes y se suben solos al volver la conexión.
 
 > Sin sesión iniciada, los PDF quedan solo dentro de la app en este iPhone. Con sesión, también quedan en la nube.

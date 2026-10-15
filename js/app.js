@@ -1046,8 +1046,149 @@ function toolsMenu() {
   chooseAction(doc.name, [
     { label: 'Anotar / firmar', run: () => openAnnotate(doc) },
     { label: 'Organizar páginas', run: () => openOrganize(doc) },
+    { label: 'Exportar a imagen', run: () => exportToImages(doc) },
+    { label: 'Convertir a Word / Excel / PPT', run: () => convertMenu(doc) },
     { label: 'Renombrar', run: renameCurrent },
   ]);
+}
+
+// ---------------------------------------------------------------------------
+// Compartir o descargar un archivo generado (computador: descarga; iPhone: compartir)
+// ---------------------------------------------------------------------------
+
+async function shareOrDownload(file) {
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: file.name });
+      return;
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+    }
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = file.name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+// ---------------------------------------------------------------------------
+// Exportar a imagen (PNG / JPEG)
+// ---------------------------------------------------------------------------
+
+function exportToImages(doc) {
+  chooseAction(`Exportar «${doc.name}» a imagen`, [
+    { label: 'PNG (mejor calidad)', run: () => doExportImages(doc, 'image/png') },
+    { label: 'JPEG (más liviano)', run: () => doExportImages(doc, 'image/jpeg') },
+  ]);
+}
+
+// ---------------------------------------------------------------------------
+// Convertir a Word / Excel / PowerPoint
+// ---------------------------------------------------------------------------
+
+function convertMenu(doc) {
+  chooseAction(`Convertir «${doc.name}»`, [
+    { label: 'Word (.docx) · texto editable', run: () => toWord(doc) },
+    { label: 'Excel (.xlsx) · texto por filas', run: () => toExcel(doc) },
+    { label: 'PowerPoint (.pptx) · páginas como imagen', run: () => toPptx(doc) },
+  ]);
+}
+
+async function toWord(doc) {
+  busy('Convirtiendo a Word…', { fraction: 0 });
+  try {
+    const blob = await pdfBlobOf(doc);
+    const pdftext = await import('./pdftext.js');
+    const office = await import('./office.js');
+    const lineas = await pdftext.extractLines(blob, (n, t) => busy('Convirtiendo a Word…', { fraction: n / t, sub: `Página ${n} de ${t}` }));
+    if (!lineas.some((l) => l.trim())) {
+      return toast('Este PDF no tiene texto (es un escaneo). Para Word necesita primero OCR.');
+    }
+    const docx = await office.textToDocx(lineas);
+    await shareOrDownload(new File([docx], `${sanitizeName(doc.name)}.docx`, { type: docx.type }));
+    toast('Word (.docx) listo. Es el texto editable; el diseño puede variar.');
+  } catch (error) {
+    toast(`No se pudo convertir: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+async function toExcel(doc) {
+  busy('Convirtiendo a Excel…', { fraction: 0 });
+  try {
+    const blob = await pdfBlobOf(doc);
+    const pdftext = await import('./pdftext.js');
+    const office = await import('./office.js');
+    const lineas = await pdftext.extractLines(blob, (n, t) => busy('Convirtiendo a Excel…', { fraction: n / t, sub: `Página ${n} de ${t}` }));
+    if (!lineas.some((l) => l.trim())) {
+      return toast('Este PDF no tiene texto (es un escaneo). Para Excel necesita primero OCR.');
+    }
+    // Cada línea es una fila; si hay varios espacios seguidos, se separan en columnas.
+    const rows = lineas.map((l) => (l.trim() ? l.split(/\s{2,}/) : ['']));
+    const xlsx = await office.rowsToXlsx(rows);
+    await shareOrDownload(new File([xlsx], `${sanitizeName(doc.name)}.xlsx`, { type: xlsx.type }));
+    toast('Excel (.xlsx) listo. Revisa las columnas; puedes ajustarlas en Excel.');
+  } catch (error) {
+    toast(`No se pudo convertir: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+async function toPptx(doc) {
+  busy('Convirtiendo a PowerPoint…', { fraction: 0 });
+  try {
+    const blob = await pdfBlobOf(doc);
+    const pdftext = await import('./pdftext.js');
+    const office = await import('./office.js');
+    const imgs = await pdftext.renderPdfToImages(blob, { type: 'image/jpeg', maxSide: 1600 }, (n, t) =>
+      busy('Convirtiendo a PowerPoint…', { fraction: n / t, sub: `Página ${n} de ${t}` }),
+    );
+    busy('Armando presentación…', { fraction: 1 });
+    const pages = [];
+    for (const im of imgs) pages.push({ bytes: new Uint8Array(await im.blob.arrayBuffer()), ext: im.ext, width: im.width, height: im.height });
+    const pptx = await office.imagesToPptx(pages);
+    await shareOrDownload(new File([pptx], `${sanitizeName(doc.name)}.pptx`, { type: pptx.type }));
+    toast('PowerPoint (.pptx) listo: cada página es una diapositiva.');
+  } catch (error) {
+    toast(`No se pudo convertir: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+async function doExportImages(doc, type) {
+  busy('Generando imágenes…', { fraction: 0 });
+  try {
+    const blob = await pdfBlobOf(doc);
+    const pdftext = await import('./pdftext.js');
+    const imgs = await pdftext.renderPdfToImages(blob, { type }, (n, t) =>
+      busy('Generando imágenes…', { fraction: n / t, sub: `Página ${n} de ${t}` }),
+    );
+    const base = sanitizeName(doc.name);
+    if (imgs.length === 1) {
+      await shareOrDownload(new File([imgs[0].blob], `${base}.${imgs[0].ext}`, { type }));
+    } else {
+      busy('Empaquetando…', { fraction: 1 });
+      const { zipSync } = await import('./vendor/fflate.js');
+      const files = {};
+      for (let i = 0; i < imgs.length; i++) {
+        files[`${base}-${String(i + 1).padStart(2, '0')}.${imgs[i].ext}`] = new Uint8Array(await imgs[i].blob.arrayBuffer());
+      }
+      const zip = zipSync(files, { level: 0 }); // las imágenes ya están comprimidas
+      await shareOrDownload(new File([zip], `${base} (imágenes).zip`, { type: 'application/zip' }));
+    }
+    toast(imgs.length === 1 ? 'Imagen lista.' : `${imgs.length} imágenes listas (ZIP).`);
+  } catch (error) {
+    toast(`No se pudo exportar: ${error.message}`);
+  } finally {
+    busy(null);
+  }
 }
 
 // ---------------------------------------------------------------------------

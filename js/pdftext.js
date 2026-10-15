@@ -30,9 +30,9 @@ async function openPdf(data) {
  * cuando está disponible: no bloquea la interfaz y sigue funcionando aunque la
  * app esté en segundo plano. Si no, usa un canvas normal.
  */
-async function pageToBlob(page, maxSide, quality) {
+async function pageToBlob(page, maxSide, quality, type = 'image/jpeg') {
   const base = page.getViewport({ scale: 1 });
-  const scale = Math.min(maxSide / Math.max(base.width, base.height), 3);
+  const scale = Math.min(maxSide / Math.max(base.width, base.height), 4);
   const viewport = page.getViewport({ scale });
   const w = Math.max(1, Math.ceil(viewport.width));
   const h = Math.max(1, Math.ceil(viewport.height));
@@ -43,17 +43,81 @@ async function pageToBlob(page, maxSide, quality) {
     canvas.height = h;
   }
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, w, h);
+  if (type !== 'image/png') {
+    // JPEG no tiene transparencia: se pone fondo blanco (PNG lo conserva).
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h);
+  }
   await page.render({ canvasContext: ctx, viewport }).promise;
   const blob = offscreen
-    ? await canvas.convertToBlob({ type: 'image/jpeg', quality })
-    : await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+    ? await canvas.convertToBlob({ type, quality })
+    : await new Promise((resolve) => canvas.toBlob(resolve, type, quality));
   if (!offscreen) {
     canvas.width = 0; // libera memoria en iOS
     canvas.height = 0;
   }
   return blob;
+}
+
+/**
+ * Convierte cada página del PDF en una imagen (PNG o JPEG) de alta resolución.
+ * @returns {{blob: Blob, ext: string}[]}
+ */
+export async function renderPdfToImages(data, { type = 'image/png', maxSide = 2200 } = {}, onPage) {
+  const doc = await openPdf(data);
+  const ext = type === 'image/png' ? 'png' : 'jpg';
+  const salida = [];
+  try {
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = await doc.getPage(n);
+      const vp = page.getViewport({ scale: 1 }); // tamaño en puntos PDF
+      salida.push({ blob: await pageToBlob(page, maxSide, 0.92, type), ext, width: vp.width, height: vp.height });
+      page.cleanup();
+      onPage?.(n, doc.numPages);
+    }
+  } finally {
+    await doc.destroy();
+  }
+  return salida;
+}
+
+/**
+ * Extrae el texto del PDF agrupando por líneas (según la posición vertical),
+ * para que al convertir a Word/Excel quede mejor estructurado.
+ * @returns {string[]} una entrada por línea; línea vacía separa páginas.
+ */
+export async function extractLines(data, onPage) {
+  const doc = await openPdf(data);
+  const lineas = [];
+  try {
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = await doc.getPage(n);
+      const content = await page.getTextContent();
+      const grupos = new Map(); // Y redondeado → items
+      for (const item of content.items) {
+        if (!item.str) continue;
+        const y = Math.round(item.transform[5] / 3) * 3; // tolerancia de 3 pt
+        (grupos.get(y) || grupos.set(y, []).get(y)).push(item);
+      }
+      const ys = [...grupos.keys()].sort((a, b) => b - a); // de arriba hacia abajo
+      for (const y of ys) {
+        const texto = grupos
+          .get(y)
+          .sort((a, b) => a.transform[4] - b.transform[4])
+          .map((i) => i.str)
+          .join('')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (texto) lineas.push(texto);
+      }
+      if (n < doc.numPages) lineas.push('');
+      page.cleanup();
+      onPage?.(n, doc.numPages);
+    }
+  } finally {
+    await doc.destroy();
+  }
+  return lineas;
 }
 
 /**
