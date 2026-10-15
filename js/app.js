@@ -1043,13 +1043,40 @@ function finishDrag() {
 /** Menú «Más» del visor: anotar, organizar páginas, renombrar. */
 function toolsMenu() {
   const doc = state.current;
-  chooseAction(doc.name, [
-    { label: 'Anotar / firmar', run: () => openAnnotate(doc) },
+  const opciones = [{ label: 'Anotar / firmar', run: () => openAnnotate(doc) }];
+  if (signedIn() && doc.estadoOcr === 'pendiente') {
+    opciones.push({ label: 'Reconocer texto (OCR)', run: () => runOcrOn(doc) });
+  }
+  opciones.push(
     { label: 'Organizar páginas', run: () => openOrganize(doc) },
     { label: 'Exportar a imagen', run: () => exportToImages(doc) },
     { label: 'Convertir a Word / Excel / PPT', run: () => convertMenu(doc) },
     { label: 'Renombrar', run: renameCurrent },
-  ]);
+  );
+  chooseAction(doc.name, opciones);
+}
+
+async function runOcrOn(doc) {
+  busy('Reconociendo texto…');
+  try {
+    const blob = await pdfBlobOf(doc);
+    const res = await cloud.runOcr(blob);
+    await updateDoc(doc.id, { textoOcr: res.texto, estadoOcr: 'completado' });
+    if (inCloud(doc)) await cloud.setOcr(doc.id, res.texto, 'completado');
+    renderLibrary();
+    busy(null);
+    toast('Texto reconocido. El documento ya es buscable por su contenido.');
+    const sugerido = sanitizeName(res.nombre_sugerido || '');
+    if (sugerido && sugerido !== doc.name && confirm(`¿Renombrar el documento como «${sugerido}»?`)) {
+      if (inCloud(doc)) await cloud.renameDocument(doc.id, sugerido);
+      await updateDoc(doc.id, { name: sugerido });
+      if (state.current?.id === doc.id) el.viewerTitle.textContent = sugerido;
+      renderLibrary();
+    }
+  } catch (error) {
+    busy(null);
+    toast(`No se pudo reconocer el texto: ${error.message}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

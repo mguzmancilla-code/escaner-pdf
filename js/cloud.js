@@ -203,6 +203,48 @@ export async function convertHiFi(pdfBlob, formato) {
   return res.blob();
 }
 
+/** OCR de un PDF escaneado: devuelve { texto, nombre_sugerido, etiquetas_sugeridas }. */
+export async function runOcr(pdfBlob) {
+  requireUser();
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) throw new Error('Inicia sesión para usar el OCR.');
+
+  const bytes = new Uint8Array(await pdfBlob.arrayBuffer());
+  let binario = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binario += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+
+  let res;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/ocr`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdfBase64: btoa(binario) }),
+    });
+  } catch {
+    throw new Error('Sin conexión con el servidor de OCR.');
+  }
+  if (!res.ok) {
+    let msg = `Error ${res.status}`;
+    if (res.status === 404) msg = 'La función de OCR no está publicada todavía.';
+    else {
+      try {
+        msg = (await res.json()).error || msg;
+      } catch {
+        /* sin cuerpo JSON */
+      }
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+/** Guarda en la nube el texto reconocido y el estado de OCR de un documento. */
+export async function setOcr(id, texto, estado) {
+  const { error } = await supabase.from('documentos').update({ texto_ocr: texto, estado_ocr: estado }).eq('id', id);
+  check(error, 'No se pudo guardar el texto reconocido');
+}
+
 export async function downloadFile(path) {
   const { data, error } = await storage().download(path);
   check(error, 'No se pudo descargar el archivo');
