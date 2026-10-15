@@ -7,8 +7,6 @@
 //   archivo › DESACTIVAR "Verify JWT" (el token se valida aquí abajo) › Deploy.
 //   Luego: Edge Functions › Secrets › agregar CLOUDCONVERT_API_KEY.
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
-
 const FORMATOS: Record<string, string> = {
   docx: 'docx',
   xlsx: 'xlsx',
@@ -25,15 +23,12 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json({ error: 'Método no permitido.' }, 405);
 
-  // 1) Verificar que el usuario tiene sesión iniciada.
+  // 1) Verificar que el usuario tiene sesión iniciada (sin librería externa).
   const auth = req.headers.get('Authorization') ?? '';
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: auth } } },
-  );
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData?.user) return json({ error: 'Inicia sesión para convertir.' }, 401);
+  const userRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/auth/v1/user`, {
+    headers: { Authorization: auth, apikey: Deno.env.get('SUPABASE_ANON_KEY')! },
+  });
+  if (!userRes.ok) return json({ error: 'Inicia sesión para convertir.' }, 401);
 
   const apiKey = Deno.env.get('CLOUDCONVERT_API_KEY');
   if (!apiKey) return json({ error: 'Falta configurar CLOUDCONVERT_API_KEY en la función.' }, 500);

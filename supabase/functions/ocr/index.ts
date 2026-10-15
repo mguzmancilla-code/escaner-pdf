@@ -7,8 +7,6 @@
 //   › DESACTIVAR "Verify JWT" › Deploy.
 //   Luego: Edge Functions › Secrets › agregar ANTHROPIC_API_KEY.
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
-
 const MODELO = 'claude-sonnet-5'; // buen balance calidad/costo; cambia a claude-haiku-4-5-20251001 para más barato
 
 const cors = {
@@ -22,11 +20,10 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Método no permitido.' }, 405);
 
   const auth = req.headers.get('Authorization') ?? '';
-  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
-    global: { headers: { Authorization: auth } },
+  const userRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/auth/v1/user`, {
+    headers: { Authorization: auth, apikey: Deno.env.get('SUPABASE_ANON_KEY')! },
   });
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData?.user) return json({ error: 'Inicia sesión para usar el OCR.' }, 401);
+  if (!userRes.ok) return json({ error: 'Inicia sesión para usar el OCR.' }, 401);
 
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) return json({ error: 'Falta configurar ANTHROPIC_API_KEY en la función.' }, 500);
