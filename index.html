@@ -27,19 +27,22 @@
       <h1 id="libraryTitle">Mis PDF</h1>
       <button id="importPdfBtn" class="icon-btn" data-icon="plusCircle" aria-label="Agregar"></button>
     </header>
-    <div class="scroll">
-      <input id="search" class="search" type="search" placeholder="Buscar PDF" autocomplete="off">
-      <nav id="crumbs" class="crumbs" aria-label="Ubicación" hidden></nav>
-      <div id="uploadBanner" class="banner" hidden>
-        <span id="uploadBannerText"></span>
-        <button id="uploadBannerBtn" class="text-btn strong">Subir</button>
-      </div>
-      <ul id="folderList" class="doc-list"></ul>
-      <ul id="docList" class="doc-list"></ul>
-      <div id="emptyState" class="empty" hidden>
-        <div class="empty-icon" data-icon="scan"></div>
-        <h2 id="emptyTitle">Aún no hay PDF</h2>
-        <p id="emptyText">Escanea un documento con la cámara o convierte imágenes de tu galería en un PDF de alta calidad.</p>
+    <div class="lib-body">
+      <aside id="libSide" class="lib-side"></aside>
+      <div class="scroll">
+        <input id="search" class="search" type="search" placeholder="Buscar PDF" autocomplete="off">
+        <nav id="crumbs" class="crumbs" aria-label="Ubicación" hidden></nav>
+        <div id="uploadBanner" class="banner" hidden>
+          <span id="uploadBannerText"></span>
+          <button id="uploadBannerBtn" class="text-btn strong">Subir</button>
+        </div>
+        <ul id="folderList" class="doc-list"></ul>
+        <ul id="docList" class="doc-list"></ul>
+        <div id="emptyState" class="empty" hidden>
+          <div class="empty-icon" data-icon="scan"></div>
+          <h2 id="emptyTitle">Aún no hay PDF</h2>
+          <p id="emptyText">Escanea un documento con la cámara o convierte imágenes de tu galería en un PDF de alta calidad.</p>
+        </div>
       </div>
     </div>
     <footer class="bottom-actions">

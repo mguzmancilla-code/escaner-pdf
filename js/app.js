@@ -62,7 +62,7 @@ const icon = (name) =>
 const $ = (id) => document.getElementById(id);
 const el = {};
 for (const id of [
-  'library', 'libraryTitle', 'search', 'crumbs', 'uploadBanner', 'uploadBannerText', 'uploadBannerBtn',
+  'library', 'libraryTitle', 'libSide', 'search', 'crumbs', 'uploadBanner', 'uploadBannerText', 'uploadBannerBtn',
   'folderList', 'docList', 'emptyState', 'emptyTitle', 'emptyText', 'scanBtn', 'imagesBtn', 'importPdfBtn',
   'editor', 'editorCancel', 'editorCreate', 'docName', 'destHint', 'pageCount', 'pageGrid', 'pagesHint', 'moveBtn',
   'addCameraBtn', 'addImagesBtn', 'pageSize', 'quality', 'margins', 'filterAll', 'qualityHint',
@@ -237,6 +237,7 @@ function renderLibrary() {
   el.docList.replaceChildren(...docs.map((doc) => docRow(doc, searching && inCloud)));
 
   const empty = !docs.length && !folders.length;
+  renderLibSide();
   el.emptyState.hidden = !empty;
   if (searching) {
     el.emptyTitle.textContent = 'Sin resultados';
@@ -249,6 +250,26 @@ function renderLibrary() {
     el.emptyText.textContent = 'Escanea un documento con la cámara o convierte imágenes de tu galería en un PDF de alta calidad.';
   }
   el.search.hidden = !allDocs.length && !state.folders.length;
+}
+
+/** Menú lateral fijo de la biblioteca (visible en computador). */
+function renderLibSide() {
+  const acciones = [
+    { icon: 'camera', label: 'Escanear', primary: true, run: () => { newDraft(); el.cameraInput.click(); } },
+    { icon: 'photo', label: 'Imágenes', run: () => { newDraft(); el.imagesInput.click(); } },
+    { icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() },
+    { icon: 'combine', label: 'Combinar PDF', run: openCombine },
+  ];
+  if (signedIn()) acciones.splice(2, 0, { icon: 'folder', label: 'Nueva carpeta', run: newFolder });
+  el.libSide.replaceChildren(
+    ...acciones.map((a) => {
+      const b = document.createElement('button');
+      b.className = `lib-action${a.primary ? ' primary' : ''}`;
+      b.innerHTML = `${icon(a.icon)}<span>${a.label}</span>`;
+      b.addEventListener('click', a.run);
+      return b;
+    }),
+  );
 }
 
 function docRow(doc, showFolder) {
