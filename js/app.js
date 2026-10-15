@@ -147,6 +147,11 @@ function busy(message, { fraction = null, sub = '' } = {}) {
 
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
+// iPhone/iPad: el lector de PDF nativo no funciona dentro de la página, así que
+// allí se renderiza con pdf.js; en computador se usa el lector nativo (<embed>).
+const isIOS = () =>
+  /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
+
 function show(screen) {
   for (const name of ['library', 'editor', 'viewer']) el[name].hidden = name !== screen;
 }
@@ -1615,9 +1620,18 @@ async function openViewer(doc) {
         return img;
       }),
     );
+  } else if (!isIOS()) {
+    // En computador: el lector de PDF nativo del navegador muestra cualquier PDF
+    // de forma fiable (algunos PDF no se renderizan bien con pdf.js).
+    const url = URL.createObjectURL(doc.pdf);
+    viewerUrls = [url];
+    const embed = document.createElement('embed');
+    embed.className = 'viewer-embed';
+    embed.src = url;
+    embed.type = 'application/pdf';
+    el.viewerPages.replaceChildren(embed);
   } else {
-    // PDF importado o descargado: se renderizan sus páginas con pdf.js y se
-    // guardan en el iPhone para que la próxima vez se abra al instante.
+    // En iPhone: se renderizan las páginas con pdf.js (el lector nativo no sirve en iframe).
     const blobs = await renderPdfPreviews(doc);
     if (blobs?.length) {
       viewerUrls = blobs.map((blob) => URL.createObjectURL(blob));
@@ -1631,7 +1645,7 @@ async function openViewer(doc) {
         }),
       );
     } else {
-      // Respaldo si no se pudo renderizar (p. ej. sin pdf.js disponible).
+      // Respaldo si no se pudo renderizar.
       const url = URL.createObjectURL(doc.pdf);
       const thumb = doc.thumb ? URL.createObjectURL(doc.thumb) : null;
       viewerUrls = thumb ? [url, thumb] : [url];

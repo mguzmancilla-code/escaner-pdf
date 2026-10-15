@@ -480,3 +480,6 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 @media (min-width: 768px) {
   .ann-side .ann-sizes { padding: 4px 12px; justify-content: flex-start; }
 }
+
+/* Visor con lector de PDF nativo (computador) */
+.viewer-embed { width: 100%; flex: 1; min-height: 85vh; border: 0; background: #fff; border-radius: 4px; }

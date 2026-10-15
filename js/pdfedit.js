@@ -25,7 +25,7 @@ export async function mergePdfs(blobs, onProgress) {
     pages.forEach((page) => out.addPage(page));
     onProgress?.(i + 1, blobs.length);
   }
-  return asBlob(await out.save());
+  return asBlob(await out.save({ useObjectStreams: false }));
 }
 
 /**
@@ -57,7 +57,7 @@ export async function composePages(sources, pages) {
     }
     out.addPage(page);
   }
-  return asBlob(await out.save());
+  return asBlob(await out.save({ useObjectStreams: false }));
 }
 
 /** Divide un PDF en un archivo por página. Devuelve [{ blob, pageNumber }]. */
@@ -70,7 +70,7 @@ export async function splitPdf(blob, onProgress) {
     const doc = await PDFLib.PDFDocument.create();
     const [page] = await doc.copyPages(src, [i]);
     doc.addPage(page);
-    salida.push({ blob: asBlob(await doc.save()), pageNumber: i + 1 });
+    salida.push({ blob: asBlob(await doc.save({ useObjectStreams: false })), pageNumber: i + 1 });
     onProgress?.(i + 1, total);
   }
   return salida;
@@ -237,5 +237,5 @@ export async function applyAnnotations(blob, items) {
       }
     }
   }
-  return asBlob(await doc.save());
+  return asBlob(await doc.save({ useObjectStreams: false }));
 }
