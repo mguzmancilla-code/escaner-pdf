@@ -1084,7 +1084,8 @@ async function runOcrOn(doc) {
 // ---------------------------------------------------------------------------
 
 async function shareOrDownload(file) {
-  if (navigator.canShare?.({ files: [file] })) {
+  // En iPhone conviene la hoja de compartir; en computador, descargar directo.
+  if (isIOS() && navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: file.name });
       return;
