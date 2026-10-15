@@ -374,7 +374,7 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 
 /* ---------- Adaptación a computador (edición en pantalla grande) ---------- */
 
-:root { --page: 860px; --page-wide: 1180px; }
+:root { --page: 1040px; --page-wide: 1240px; }
 
 /* Centra el contenido en pantallas anchas; en el teléfono deja 16px de margen. */
 .bar,
@@ -483,3 +483,14 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 
 /* Visor con lector de PDF nativo (computador) */
 .viewer-embed { width: 100%; flex: 1; min-height: 85vh; border: 0; background: #fff; border-radius: 4px; }
+
+/* Panel de firmas guardadas */
+.firmas-card { width: 420px; max-width: 92vw; }
+.firmas-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; padding: 12px; max-height: 50vh; overflow-y: auto; }
+.firma-item { position: relative; aspect-ratio: 3 / 2; border-radius: 8px; background: #fff; border: 0.5px solid var(--separator); overflow: hidden; }
+.firma-item img { width: 100%; height: 100%; object-fit: contain; cursor: pointer; }
+.firma-del { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff; }
+.firma-del svg { width: 16px; height: 16px; }
+
+/* El visor aprovecha todo el ancho (imágenes centradas, embed a ancho completo) */
+.viewer-pages { padding-inline: 16px; }

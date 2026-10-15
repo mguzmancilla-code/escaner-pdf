@@ -1173,13 +1173,18 @@ function renderAnnTools() {
     }
     extras.push(sizes);
   }
-  // Importar una imagen de firma (p. ej. PNG con fondo transparente).
+  // Importar una imagen de firma (p. ej. PNG con fondo transparente) y reutilizar guardadas.
   if (ann.tool === 'draw') {
     const imp = document.createElement('button');
     imp.className = 'ann-tool';
     imp.innerHTML = `${icon('download')}<span>Importar firma</span>`;
     imp.addEventListener('click', importSignature);
     extras.push(imp);
+    const guard = document.createElement('button');
+    guard.className = 'ann-tool';
+    guard.innerHTML = `${icon('signature')}<span>Firmas guardadas</span>`;
+    guard.addEventListener('click', firmasGuardadasMenu);
+    extras.push(guard);
   }
   if (ann.selected) {
     const del = document.createElement('button');
@@ -1193,6 +1198,24 @@ function renderAnnTools() {
   el.annHint.textContent = ANN_HINTS[ann.tool];
 }
 
+// Firmas guardadas (en este navegador) para reutilizarlas.
+const getFirmas = () => storage.get('firmas', []);
+const saveFirmas = (lista) => storage.set('firmas', lista.slice(0, 12));
+
+/** Coloca una firma (imagen PNG) sobre la primera página, centrada abajo. */
+async function addSignatureItem(dataUrl) {
+  const img = await loadImageEl(dataUrl);
+  const page = ann.pages[0];
+  const ar = img.width / img.height;
+  const wr = 0.32;
+  const hr = (wr * page.width) / ar / page.height;
+  ann.items.push({ id: ann.nextId++, page: 0, type: 'image', xr: (1 - wr) / 2, yr: 0.8, wr, hr, dataUrl });
+  ann.tool = 'select';
+  renderAnnTools();
+  renderAnnPages();
+  toast('Firma agregada. Arrástrala a su lugar.');
+}
+
 async function importSignature() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -1201,35 +1224,66 @@ async function importSignature() {
     const file = input.files?.[0];
     if (!file) return;
     busy('Cargando firma…');
+    let dataUrl;
     try {
       // Se normaliza a PNG (conserva la transparencia de las firmas recortadas).
-      const dataUrl = await imageToPng(file);
-      const img = await loadImageEl(dataUrl);
-      const page = ann.pages[0];
-      const ar = img.width / img.height; // ancho/alto de la imagen
-      const wr = 0.32; // 32% del ancho de la página
-      const hr = (wr * page.width) / ar / page.height;
-      ann.items.push({
-        id: ann.nextId++,
-        page: 0,
-        type: 'image',
-        xr: (1 - wr) / 2,
-        yr: 0.8,
-        wr,
-        hr,
-        dataUrl,
-      });
-      ann.tool = 'select';
-      renderAnnTools();
-      renderAnnPages();
-      toast('Firma agregada. Arrástrala a su lugar.');
+      dataUrl = await imageToPng(file);
+      await addSignatureItem(dataUrl);
     } catch (error) {
       toast(`No se pudo cargar la firma: ${error.message}`);
+      return;
     } finally {
       busy(null);
     }
+    if (!getFirmas().includes(dataUrl) && confirm('¿Guardar esta firma para reutilizarla más adelante?')) {
+      saveFirmas([dataUrl, ...getFirmas()]);
+    }
   });
   input.click();
+}
+
+/** Panel con las firmas guardadas: tocar para insertar, o borrar. */
+function firmasGuardadasMenu() {
+  const firmas = getFirmas();
+  const sheet = document.createElement('div');
+  sheet.className = 'action-sheet';
+  const card = document.createElement('div');
+  card.className = 'action-card firmas-card';
+  card.innerHTML = '<p class="action-title">Firmas guardadas</p><div class="firmas-grid"></div>';
+  const grid = card.querySelector('.firmas-grid');
+  const close = () => sheet.remove();
+  if (!firmas.length) {
+    grid.innerHTML = '<p class="hint" style="padding:16px">Aún no tienes firmas guardadas. Usa «Importar firma» y acepta guardarla.</p>';
+  }
+  for (const dataUrl of firmas) {
+    const item = document.createElement('div');
+    item.className = 'firma-item';
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.alt = 'Firma';
+    img.addEventListener('click', () => {
+      close();
+      addSignatureItem(dataUrl);
+    });
+    const del = document.createElement('button');
+    del.className = 'firma-del';
+    del.innerHTML = icon('trash');
+    del.title = 'Borrar';
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      saveFirmas(getFirmas().filter((x) => x !== dataUrl));
+      item.remove();
+    });
+    item.append(img, del);
+    grid.append(item);
+  }
+  const cancel = document.createElement('button');
+  cancel.className = 'action-cancel';
+  cancel.textContent = 'Cerrar';
+  cancel.addEventListener('click', close);
+  sheet.append(card, cancel);
+  sheet.addEventListener('click', (e) => e.target === sheet && close());
+  document.body.append(sheet);
 }
 
 function imageToPng(file) {
