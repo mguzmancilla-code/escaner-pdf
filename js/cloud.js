@@ -180,7 +180,7 @@ export async function convertHiFi(pdfBlob, formato) {
 
   let res;
   try {
-    res = await fetch(`${SUPABASE_URL}/functions/v1/convertir`, {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/Convertir`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ formato, pdfBase64 }),
@@ -216,7 +216,7 @@ export async function runOcr(pdfBlob) {
 
   let res;
   try {
-    res = await fetch(`${SUPABASE_URL}/functions/v1/ocr`, {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/Ocr`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ pdfBase64: btoa(binario) }),
