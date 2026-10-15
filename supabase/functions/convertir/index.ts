@@ -62,12 +62,15 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         tasks: {
           'import-1': { operation: 'import/base64', file: body.pdfBase64, filename: 'entrada.pdf' },
-          'convert-1': { operation: 'convert', input: 'import-1', input_format: 'pdf', output_format: salida },
+          'convert-1': { operation: 'convert', input: 'import-1', output_format: salida },
           'export-1': { operation: 'export/url', input: 'convert-1' },
         },
       }),
     });
-    if (!crear.ok) return json({ error: `CloudConvert rechazó la conversión (${crear.status}).` }, 502);
+    if (!crear.ok) {
+      const detalle = await crear.text();
+      return json({ error: `CloudConvert rechazó la conversión (${crear.status}): ${detalle.slice(0, 300)}` }, 502);
+    }
     const job = (await crear.json()).data;
 
     // 4) Esperar a que termine (sondeo con límite de tiempo).
@@ -80,7 +83,10 @@ Deno.serve(async (req) => {
         url = exportTask?.result?.files?.[0]?.url ?? '';
         break;
       }
-      if (estado.status === 'error') return json({ error: 'La conversión falló en CloudConvert.' }, 502);
+      if (estado.status === 'error') {
+        const fallido = estado.tasks.find((t: any) => t.status === 'error');
+        return json({ error: `CloudConvert: ${fallido?.message ?? 'conversión fallida'}` }, 502);
+      }
     }
     if (!url) return json({ error: 'La conversión tardó demasiado. Intenta con un PDF más corto.' }, 504);
 
