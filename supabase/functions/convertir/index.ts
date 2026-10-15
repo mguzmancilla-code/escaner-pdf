@@ -51,13 +51,25 @@ Deno.serve(async (req) => {
     });
 
   try {
+    // 2.5) Consultar los motores disponibles para esta conversión (el motor por
+    // defecto puede fallar con algunos PDF; se eligen los alternativos primero).
+    let engines: string[] = [];
+    try {
+      const fRes = await cc(`/convert/formats?filter[input_format]=pdf&filter[output_format]=${salida}`);
+      engines = ((await fRes.json()).data ?? []).map((f: any) => f.engine).filter(Boolean);
+    } catch {
+      /* si no se pueden listar, se usa el motor por defecto */
+    }
+
     // 3) Crear el trabajo: importar (base64) → convertir → exportar (url).
+    const convertTask: Record<string, unknown> = { operation: 'convert', input: 'import-1', output_format: salida };
+    if (engines.length) convertTask.engine = engines[0];
     const crear = await cc('/jobs', {
       method: 'POST',
       body: JSON.stringify({
         tasks: {
           'import-1': { operation: 'import/base64', file: body.pdfBase64, filename: 'entrada.pdf' },
-          'convert-1': { operation: 'convert', input: 'import-1', output_format: salida },
+          'convert-1': convertTask,
           'export-1': { operation: 'export/url', input: 'convert-1' },
         },
       }),
@@ -83,7 +95,8 @@ Deno.serve(async (req) => {
           .filter((t: any) => t.status === 'error')
           .map((t: any) => `${t.operation}: ${t.message ?? t.code ?? '?'}`);
         console.error('CloudConvert error:', JSON.stringify(estado.tasks));
-        return json({ error: `CloudConvert → ${errores.join(' || ') || 'conversión fallida'}` }, 502);
+        const motores = engines.length ? ` [motores: ${engines.join(', ')}]` : '';
+        return json({ error: `CloudConvert → ${errores.join(' || ') || 'conversión fallida'}${motores}` }, 502);
       }
     }
     if (!url) return json({ error: 'La conversión tardó demasiado. Intenta con un PDF más corto.' }, 504);
