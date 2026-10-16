@@ -259,11 +259,11 @@ function isFullFrame(corners) {
 
 /**
  * @param {HTMLImageElement} img imagen original
- * @param {{corners:number[][], rotation:number, filter:string}} page
+ * @param {{corners:number[][], rotation:number, filter:string, adjust?:object}} page
  * @param {number} maxSide lado máximo del resultado (para vistas previas rápidas)
  * @returns {HTMLCanvasElement}
  */
-export function renderPage(img, { corners, rotation, filter }, maxSide = MAX_SIDE) {
+export function renderPage(img, { corners, rotation, filter, adjust }, maxSide = MAX_SIDE) {
   const [W, H] = sizeOf(img);
   const scale = Math.min(1, Math.min(MAX_SIDE, maxSide) / Math.max(W, H), Math.sqrt(MAX_AREA / (W * H)));
   const sw = Math.max(1, Math.round(W * scale));
@@ -274,7 +274,7 @@ export function renderPage(img, { corners, rotation, filter }, maxSide = MAX_SID
   sctx.drawImage(img, 0, 0, sw, sh);
 
   let canvas;
-  if (isFullFrame(corners) && filter === 'original') {
+  if (isFullFrame(corners) && filter === 'original' && !hasAdjust(adjust)) {
     canvas = src;
   } else {
     let data = sctx.getImageData(0, 0, sw, sh);
@@ -283,6 +283,7 @@ export function renderPage(img, { corners, rotation, filter }, maxSide = MAX_SID
     }
     releaseCanvas(src);
     applyFilter(data, filter);
+    applyAdjust(data, adjust);
     canvas = createCanvas(data.width, data.height);
     canvas.getContext('2d').putImageData(data, 0, 0);
   }
@@ -376,6 +377,71 @@ function warpPerspective(src, quad) {
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Ajustes manuales: brillo, contraste, saturación y nitidez (-100…100; nitidez 0…100)
+// ---------------------------------------------------------------------------
+
+export const NO_ADJUST = Object.freeze({ brillo: 0, contraste: 0, saturacion: 0, nitidez: 0 });
+
+export const hasAdjust = (a) => Boolean(a && (a.brillo || a.contraste || a.saturacion || a.nitidez));
+
+/** Aplica los ajustes sobre los píxeles (después del filtro). */
+function applyAdjust(imageData, adjust) {
+  if (!hasAdjust(adjust)) return;
+  const { data: d, width: w, height: h } = imageData;
+  const { brillo = 0, contraste = 0, saturacion = 0, nitidez = 0 } = adjust;
+  if (brillo || contraste) {
+    // Contraste alrededor del gris medio (×0,5 a ×2) y luego brillo (±80 niveles).
+    const f = 2 ** (contraste / 100);
+    const lut = new Uint8ClampedArray(256);
+    for (let v = 0; v < 256; v++) lut[v] = (v - 128) * f + 128 + brillo * 0.8;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = lut[d[i]];
+      d[i + 1] = lut[d[i + 1]];
+      d[i + 2] = lut[d[i + 2]];
+    }
+  }
+  if (saturacion) {
+    const k = 1 + saturacion / 100; // 0 = gris, 2 = el doble de color
+    for (let i = 0; i < d.length; i += 4) {
+      const l = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+      d[i] = clamp(l + (d[i] - l) * k, 0, 255);
+      d[i + 1] = clamp(l + (d[i + 1] - l) * k, 0, 255);
+      d[i + 2] = clamp(l + (d[i + 2] - l) * k, 0, 255);
+    }
+  }
+  if (nitidez > 0) sharpen(d, w, h, (nitidez / 100) * 1.6);
+}
+
+/**
+ * Ajuste automático: estira el rango de brillo para que lo más oscuro quede
+ * casi negro y lo más claro casi blanco (niveles automáticos), sin exagerar.
+ */
+export function autoAdjust(img, page) {
+  const canvas = renderPage(img, { ...page, adjust: NO_ADJUST }, 500);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const { data: d } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  releaseCanvas(canvas);
+  const hist = new Uint32Array(256);
+  let n = 0;
+  for (let i = 0; i < d.length; i += 16) {
+    hist[(d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8]++;
+    n++;
+  }
+  const percentil = (p) => {
+    let acc = 0;
+    for (let v = 0; v < 256; v++) if ((acc += hist[v]) >= n * p) return v;
+    return 255;
+  };
+  const bajo = percentil(0.01);
+  const alto = percentil(0.99);
+  const f = clamp(250 / Math.max(40, alto - bajo), 1, 1.5); // moderado: se puede subir a mano
+  const contraste = Math.round(100 * Math.log2(f));
+  const medio = (bajo + alto) / 2;
+  const brillo = clamp(Math.round((-(medio - 128) * f) / 0.8), -40, 40);
+  return { brillo, contraste, saturacion: page.filter === 'original' || page.filter === 'sharp' ? 10 : 0, nitidez: 25 };
 }
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,8 @@ pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblio
 
 ## Uso
 - **Escanear**: haz la foto → la app detecta los bordes de la hoja con **OpenCV** (se descarga la primera
-  vez, ~10 MB, y luego funciona sin conexión; si no está disponible usa su detector propio) (puedes ajustar las 4 esquinas con lupa) → pestaña **Resultado** para el filtro (Original, Nítido, Grises, Blanco y negro) y el giro → **Listo** o **Listo y escanear otra**.
+  vez, ~10 MB, y luego funciona sin conexión; si no está disponible usa su detector propio) (puedes ajustar las 4 esquinas con lupa) → pestaña **Resultado** para el filtro (Original, Nítido, Grises, Blanco y negro), el giro y **Ajustar**
+  (brillo, contraste, saturación y nitidez; **Auto** los calcula solo y **Aplicar a todas** los copia al resto de páginas) → **Listo** o **Listo y escanear otra**.
 - **Imágenes**: elige varias fotos o archivos a la vez; se agregan como páginas.
 - Toca una página para editarla o cambiarla de posición (‹ ›).
 - **Calidad del PDF**: tamaño A4 / Carta / Oficio / ajustado a la imagen, márgenes y calidad (Máxima, Alta ≈300 ppp, Media, Compacta).

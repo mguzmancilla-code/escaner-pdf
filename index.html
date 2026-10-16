@@ -148,6 +148,18 @@
     </div>
     <div id="filterControls" class="controls" hidden>
       <div id="filterSeg" class="segmented small"></div>
+      <div class="adjust-bar">
+        <button id="adjustToggle" class="chip" aria-expanded="false"><span data-icon="sliders"></span>Ajustar</button>
+        <button id="adjustAuto" class="chip"><span data-icon="sparkle"></span>Auto</button>
+        <button id="adjustReset" class="chip" hidden>Restablecer</button>
+        <button id="adjustAll" class="chip" hidden>Aplicar a todas</button>
+      </div>
+      <div id="adjustPanel" class="adjust-panel" hidden>
+        <label class="adjust-row"><span>Brillo</span><input type="range" min="-100" max="100" step="1" data-adjust="brillo"><output></output></label>
+        <label class="adjust-row"><span>Contraste</span><input type="range" min="-100" max="100" step="1" data-adjust="contraste"><output></output></label>
+        <label class="adjust-row"><span>Saturación</span><input type="range" min="-100" max="100" step="1" data-adjust="saturacion"><output></output></label>
+        <label class="adjust-row"><span>Nitidez</span><input type="range" min="0" max="100" step="1" data-adjust="nitidez"><output></output></label>
+      </div>
     </div>
     <footer class="pe-footer">
       <button id="peDelete" class="icon-btn" data-icon="trash" aria-label="Eliminar página"></button>

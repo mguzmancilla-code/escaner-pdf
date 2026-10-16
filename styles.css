@@ -741,3 +741,13 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 @media (prefers-color-scheme: dark) {
   .wordmark span:first-child { color: #dbe7ff; }
 }
+
+/* ---------- Ajustes del resultado (brillo, contraste…) ---------- */
+.adjust-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 10px; }
+.adjust-bar .chip.active { background: var(--accent); color: #fff; }
+.adjust-panel { display: grid; gap: 4px; margin: 10px auto 0; max-width: 520px; width: 100%; }
+.adjust-row { display: grid; grid-template-columns: 84px 1fr 40px; align-items: center; gap: 10px; font-size: 14px; color: #fff; }
+.adjust-row output { text-align: right; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.7); font-size: 13px; }
+.adjust-row input[type="range"] { width: 100%; accent-color: var(--accent); height: 28px; }
+#filterControls { flex-direction: column; align-items: stretch; }
+#filterControls .segmented { align-self: center; }

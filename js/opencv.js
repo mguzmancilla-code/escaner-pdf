@@ -92,8 +92,14 @@ export async function detectDocument(img, { timeout = 8000 } = {}) {
     const tmp = mat(new cv.Mat());
     for (let i = 0; i < canales.size(); i++) {
       const ch = canales.get(i);
-      const mc = mediana(ch.data);
-      cv.Canny(ch, tmp, Math.max(8, 0.4 * mc), Math.min(255, 1.0 * mc));
+      if (i === 0) {
+        const mc = mediana(ch.data); // luminosidad: umbrales según el brillo típico
+        cv.Canny(ch, tmp, Math.max(8, 0.4 * mc), Math.min(255, 1.0 * mc));
+      } else {
+        // Color (a, b): las diferencias son pequeñas (p. ej., café frente a negro
+        // neutro difieren 6–10 niveles), así que se usan umbrales bajos fijos.
+        cv.Canny(ch, tmp, 5, 14);
+      }
       cv.bitwise_or(color, tmp, color);
       ch.delete();
     }
@@ -107,19 +113,104 @@ export async function detectDocument(img, { timeout = 8000 } = {}) {
     cv.morphologyEx(otsu, otsu, cv.MORPH_CLOSE, k9, ancla, 2);
     mapas.push(otsu);
 
+    const soporte = soporteDeBordes(lab.data, w, h);
     let mejor = null;
     for (const mapa of mapas) {
-      for (const c of candidatos(cv, mapa, w, h)) if (!mejor || c.score > mejor.score) mejor = c;
+      for (const c of candidatos(cv, mapa, w, h, soporte)) if (!mejor || c.score > mejor.score) mejor = c;
     }
     if (!mejor) return null;
-    return ordenar(mejor.quad).map(([x, y]) => [clamp01(x / w), clamp01(y / h)]);
+    const quad = ordenar(mejor.quad).map(([x, y]) => [clamp01(x / w), clamp01(y / h)]);
+    return refinar(img, quad);
   } finally {
     for (const m of mats) m.delete();
   }
 }
 
+/**
+ * Ajuste fino: a mayor resolución, mueve cada lado hasta el borde real más
+ * marcado de su alrededor. Corrige el margen que dejan los bordes engrosados
+ * (que si no deja una franja de mesa en el resultado).
+ */
+export function refinar(img, quad, maxSide = 1600) {
+  const W = img.naturalWidth || img.width;
+  const H = img.naturalHeight || img.height;
+  const s = Math.min(1, maxSide / Math.max(W, H));
+  const w = Math.max(16, Math.round(W * s));
+  const h = Math.max(16, Math.round(H * s));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  canvas.width = 0;
+  canvas.height = 0;
+  const luz = new Float32Array(w * h);
+  for (let i = 0, j = 0; j < luz.length; i += 4, j++) luz[j] = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+  const L = (x, y) => luz[clampInt(Math.round(y), 0, h - 1) * w + clampInt(Math.round(x), 0, w - 1)];
+
+  const P = quad.map(([x, y]) => [x * w, y * h]);
+  const diag = Math.hypot(w, h);
+  const rango = Math.max(4, Math.round(diag * 0.012));
+  const lineas = [];
+  for (let i = 0; i < 4; i++) {
+    const [ax, ay] = P[i];
+    const [bx, by] = P[(i + 1) % 4];
+    const largo = Math.hypot(bx - ax, by - ay) || 1;
+    const ux = (bx - ax) / largo;
+    const uy = (by - ay) / largo;
+    const nx = -uy;
+    const ny = ux;
+    const desplazamientos = [];
+    for (let k = 1; k < 24; k++) {
+      const t = k / 24;
+      const px = ax + (bx - ax) * t;
+      const py = ay + (by - ay) * t;
+      let mejor = 0;
+      let mejorO = 0;
+      for (let o = -rango; o <= rango; o++) {
+        let g = 0;
+        for (const a of [-2, 0, 2]) {
+          const qx = px + ux * a + nx * o;
+          const qy = py + uy * a + ny * o;
+          g += Math.abs(L(qx + nx, qy + ny) - L(qx - nx, qy - ny));
+        }
+        if (g > mejor) {
+          mejor = g;
+          mejorO = o;
+        }
+      }
+      if (mejor / 3 > 12) desplazamientos.push(mejorO); // solo bordes con contraste real
+    }
+    const off = desplazamientos.length >= 6 ? medianaNum(desplazamientos) : 0;
+    lineas.push({ x: ax + nx * off, y: ay + ny * off, ux, uy });
+  }
+  // Cada esquina es el cruce del lado anterior con el siguiente.
+  const nuevo = [];
+  for (let i = 0; i < 4; i++) {
+    const p = interseccion(lineas[(i + 3) % 4], lineas[i]);
+    if (!p || Math.hypot(p[0] - P[i][0], p[1] - P[i][1]) > diag * 0.03) return quad; // ajuste dudoso
+    nuevo.push([clamp01(p[0] / w), clamp01(p[1] / h)]);
+  }
+  return nuevo;
+}
+
+function interseccion(a, b) {
+  const den = a.ux * b.uy - a.uy * b.ux;
+  if (Math.abs(den) < 1e-6) return null;
+  const t = ((b.x - a.x) * b.uy - (b.y - a.y) * b.ux) / den;
+  return [a.x + a.ux * t, a.y + a.uy * t];
+}
+
+function medianaNum(v) {
+  const o = [...v].sort((a, b) => a - b);
+  return o[o.length >> 1];
+}
+
+const clampInt = (v, a, b) => (v < a ? a : v > b ? b : v);
+
 /** Cuadriláteros candidatos en un mapa binario, con un puntaje (área × rectangularidad). */
-function candidatos(cv, mapa, w, h) {
+function candidatos(cv, mapa, w, h, soporte) {
   const contornos = new cv.MatVector();
   const jerarquia = new cv.Mat();
   const salida = [];
@@ -160,7 +251,11 @@ function candidatos(cv, mapa, w, h) {
         const qa = areaPoligono(quad);
         const relleno = qa ? area / qa : 0;
         if (relleno < 0.85) continue;
-        salida.push({ score: (qa / areaImg) * Math.min(1, relleno), quad });
+        // Cuánto del contorno cae sobre un borde visible: descarta lados «estirados»
+        // hacia manchas del fondo (que inflan el área sin ser parte de la hoja).
+        const { media, minimo } = soporte(quad);
+        if (minimo < 0.45) continue;
+        salida.push({ score: (qa / areaImg) * Math.min(1, relleno) * media * media, quad });
       } finally {
         c.delete();
         hull.delete();
@@ -172,6 +267,46 @@ function candidatos(cv, mapa, w, h) {
     jerarquia.delete();
   }
   return salida;
+}
+
+/**
+ * Devuelve una función que mide, para un cuadrilátero, qué fracción de cada lado
+ * está sobre un borde real (cambio de luminosidad o de color en LAB).
+ */
+function soporteDeBordes(lab, w, h) {
+  const at = (x, y, c) => lab[(clampInt(Math.round(y), 0, h - 1) * w + clampInt(Math.round(x), 0, w - 1)) * 3 + c];
+  const salto = (x1, y1, x2, y2) =>
+    Math.max(
+      Math.abs(at(x1, y1, 0) - at(x2, y2, 0)),
+      2 * Math.abs(at(x1, y1, 1) - at(x2, y2, 1)),
+      2 * Math.abs(at(x1, y1, 2) - at(x2, y2, 2)),
+    );
+  return (quad) => {
+    const porLado = [];
+    for (let i = 0; i < 4; i++) {
+      const [ax, ay] = quad[i];
+      const [bx, by] = quad[(i + 1) % 4];
+      const largo = Math.hypot(bx - ax, by - ay) || 1;
+      const nx = -(by - ay) / largo;
+      const ny = (bx - ax) / largo;
+      let ok = 0;
+      const N = 30;
+      for (let k = 1; k < N; k++) {
+        const px = ax + ((bx - ax) * k) / N;
+        const py = ay + ((by - ay) * k) / N;
+        for (let o = -3; o <= 3; o++) {
+          const qx = px + nx * o;
+          const qy = py + ny * o;
+          if (salto(qx - nx * 2, qy - ny * 2, qx + nx * 2, qy + ny * 2) >= 10) {
+            ok++;
+            break;
+          }
+        }
+      }
+      porLado.push(ok / (N - 1));
+    }
+    return { media: porLado.reduce((a, b) => a + b, 0) / 4, minimo: Math.min(...porLado) };
+  };
 }
 
 function rectanguloGirado({ center, size, angle }) {

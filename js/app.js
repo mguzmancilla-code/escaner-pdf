@@ -2,8 +2,11 @@ import { deleteDoc, listDocs, saveDoc } from './db.js';
 import {
   FILTERS,
   FULL_FRAME,
+  NO_ADJUST,
+  autoAdjust,
   canvasToBlob,
   detectCorners,
+  hasAdjust,
   downscale,
   loadImage,
   releaseCanvas,
@@ -56,6 +59,7 @@ const ICONS = {
   signature: '<path d="M4 17c3 0 3-10 6-10s0 10 3 10 2-6 4-6 2 2 3 2"/>',
   stamp: '<rect x="5" y="14" width="14" height="6" rx="1"/><path d="M12 14V9M9 4h6a2 2 0 0 1 2 2c0 2-2 2-2 3H9c0-1-2-1-2-3a2 2 0 0 1 2-2z"/>',
   star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8-4.2-4.1 5.9-.9z"/>',
+  sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   folderPlus: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6M9 13h6"/>',
   upload: '<path d="M7 18h10.5a4.5 4.5 0 0 0 .6-8.96A6 6 0 0 0 6.34 10.1 4 4 0 0 0 7 18zM12 16v-5M9.5 13.5 12 11l2.5 2.5"/>',
@@ -77,6 +81,7 @@ for (const id of [
   'editor', 'editorCancel', 'editorCreate', 'docName', 'destHint', 'pageCount', 'pageGrid', 'pagesHint', 'moveBtn',
   'addCameraBtn', 'addImagesBtn', 'pageSize', 'quality', 'margins', 'filterAll', 'qualityHint',
   'pageEditor', 'peCancel', 'peDone', 'peTitle', 'peTabs', 'peStage', 'cropBox', 'cropImg', 'cropSvg',
+  'adjustToggle', 'adjustAuto', 'adjustReset', 'adjustAll', 'adjustPanel',
   'previewImg', 'peSpinner', 'loupe', 'cropControls', 'filterControls', 'filterSeg', 'autoBtn', 'fullBtn',
   'peDelete', 'peRotL', 'peRotR', 'peMoveL', 'peMoveR', 'peNextWrap', 'peNext',
   'viewer', 'viewerBack', 'viewerTitle', 'viewerPages', 'shareBtn', 'downloadBtn', 'deleteBtn', 'toolsBtn',
@@ -2496,10 +2501,11 @@ async function importPdfs(files) {
 async function findCorners(img) {
   if (!cvReady()) busy('Preparando el detector de bordes (solo la primera vez)…');
   try {
-    const corners = await detectDocument(img);
+    const corners = await detectDocument(img, { timeout: 15000 });
     if (corners) return corners;
   } catch (error) {
     console.warn('OpenCV no disponible; se usa el detector propio:', error.message);
+    toast('Se usó el detector básico (el avanzado aún no estaba listo). Revisa los bordes.');
   } finally {
     busy('Detectando bordes…');
   }
@@ -2509,6 +2515,12 @@ async function findCorners(img) {
 /** Empieza a descargar OpenCV en segundo plano (mientras se toma la foto). */
 function preloadCV() {
   if (navigator.onLine !== false) loadCV().catch(() => {});
+}
+
+/** Al abrir la app, deja OpenCV listo en segundo plano (salvo con ahorro de datos). */
+function preloadCVWhenIdle() {
+  if (navigator.connection?.saveData) return;
+  setTimeout(preloadCV, 4000);
 }
 
 function newDraft() {
@@ -2564,6 +2576,7 @@ function makePage(file, fromCamera) {
     corners: FULL_FRAME,
     rotation: 0,
     filter: fromCamera ? 'sharp' : 'original',
+    adjust: { ...NO_ADJUST },
     processed: null,
     width: 0,
     height: 0,
@@ -2737,6 +2750,7 @@ async function openPageEditor(index, { isNew = false, fromCamera = false } = {})
     corners: page.corners.map((p) => [...p]),
     rotation: page.rotation,
     filter: page.filter,
+    adjust: { ...NO_ADJUST, ...page.adjust },
     isNew,
     fromCamera,
     tab: 'crop',
@@ -2751,6 +2765,8 @@ async function openPageEditor(index, { isNew = false, fromCamera = false } = {})
   updatePeTitle();
   setTab('crop');
   renderFilterSeg();
+  el.adjustPanel.hidden = !hasAdjust(state.pe.adjust);
+  renderAdjust();
   await nextFrame();
   layoutCrop();
 }
@@ -2789,6 +2805,29 @@ function renderFilterSeg() {
       return button;
     }),
   );
+}
+
+/** Sincroniza los controles de ajuste con la página abierta. */
+function renderAdjust() {
+  const pe = state.pe;
+  if (!pe) return;
+  for (const input of el.adjustPanel.querySelectorAll('input[data-adjust]')) {
+    const v = pe.adjust[input.dataset.adjust] ?? 0;
+    input.value = v;
+    input.nextElementSibling.textContent = v > 0 && input.min !== '0' ? `+${v}` : String(v);
+  }
+  const ajustado = hasAdjust(pe.adjust);
+  el.adjustReset.hidden = !ajustado;
+  el.adjustAll.hidden = !ajustado || (state.draft?.pages.length ?? 0) < 2;
+  el.adjustToggle.setAttribute('aria-expanded', String(!el.adjustPanel.hidden));
+  el.adjustToggle.classList.toggle('active', !el.adjustPanel.hidden);
+}
+
+let adjustTimer;
+function adjustChanged() {
+  renderAdjust();
+  clearTimeout(adjustTimer);
+  adjustTimer = setTimeout(updatePreview, 120); // espera a que el dedo se detenga un poco
 }
 
 function layoutCrop() {
@@ -2877,7 +2916,7 @@ let previewToken = 0;
 async function updatePreview() {
   const pe = state.pe;
   if (!pe || pe.tab !== 'result') return;
-  const key = JSON.stringify([pe.corners, pe.rotation, pe.filter]);
+  const key = JSON.stringify([pe.corners, pe.rotation, pe.filter, pe.adjust]);
   if (key === pe.previewKey) {
     el.previewImg.hidden = false;
     return;
@@ -2920,13 +2959,15 @@ function closePageEditor() {
 
 /** Guarda los cambios de la página y la procesa en segundo plano. */
 function commitPage() {
-  const { page, corners, rotation, filter, isNew } = state.pe;
+  const { page, corners, rotation, filter, adjust, isNew } = state.pe;
   const changed =
     isNew ||
-    JSON.stringify([corners, rotation, filter]) !== JSON.stringify([page.corners, page.rotation, page.filter]);
+    JSON.stringify([corners, rotation, filter, adjust]) !==
+      JSON.stringify([page.corners, page.rotation, page.filter, page.adjust ?? NO_ADJUST]);
   page.corners = corners;
   page.rotation = rotation;
   page.filter = filter;
+  page.adjust = { ...adjust };
   if (changed) scheduleRender(page);
   closePageEditor();
   renderEditor();
@@ -3137,6 +3178,45 @@ function setup() {
     state.pe.corners = corners ?? FULL_FRAME.map((p) => [...p]);
     drawCrop();
   });
+  el.adjustToggle.addEventListener('click', () => {
+    el.adjustPanel.hidden = !el.adjustPanel.hidden;
+    renderAdjust();
+  });
+  el.adjustPanel.addEventListener('input', (event) => {
+    const key = event.target.dataset?.adjust;
+    if (!key || !state.pe) return;
+    state.pe.adjust = { ...state.pe.adjust, [key]: Number(event.target.value) };
+    adjustChanged();
+  });
+  el.adjustAuto.addEventListener('click', () => {
+    const pe = state.pe;
+    if (!pe) return;
+    try {
+      pe.adjust = autoAdjust(pe.img, pe);
+    } catch (error) {
+      return toast(error.message);
+    }
+    el.adjustPanel.hidden = false;
+    adjustChanged();
+    toast('Ajuste automático aplicado. Puedes afinarlo con los controles.');
+  });
+  el.adjustReset.addEventListener('click', () => {
+    if (!state.pe) return;
+    state.pe.adjust = { ...NO_ADJUST };
+    adjustChanged();
+  });
+  el.adjustAll.addEventListener('click', () => {
+    const pe = state.pe;
+    if (!pe || !state.draft) return;
+    let n = 0;
+    for (const page of state.draft.pages) {
+      if (page === pe.page) continue;
+      page.adjust = { ...pe.adjust };
+      scheduleRender(page);
+      n++;
+    }
+    toast(n === 1 ? 'Ajustes aplicados a 1 página más.' : `Ajustes aplicados a ${n} páginas más.`);
+  });
   el.fullBtn.addEventListener('click', () => {
     state.pe.corners = FULL_FRAME.map((p) => [...p]);
     drawCrop();
@@ -3313,6 +3393,8 @@ async function start() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+  // En el teléfono (donde se escanea) se deja el detector avanzado listo de antemano.
+  if (isIOS() || matchMedia('(pointer: coarse)').matches) preloadCVWhenIdle();
 }
 
 start();
