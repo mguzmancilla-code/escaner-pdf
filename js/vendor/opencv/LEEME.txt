@@ -1,0 +1,2 @@
+OpenCV.js 4.10.0 (compilación oficial de OpenCV, empaquetada en npm como
+@techstark/opencv-js@4.10.0-release.1). Licencia Apache-2.0: https://github.com/opencv/opencv

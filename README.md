@@ -14,7 +14,8 @@ pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblio
 3. Ábrela desde el icono **AgneScan**: se ve a pantalla completa, como una app.
 
 ## Uso
-- **Escanear**: haz la foto → la app detecta los bordes de la hoja (puedes ajustar las 4 esquinas con lupa) → pestaña **Resultado** para el filtro (Original, Nítido, Grises, Blanco y negro) y el giro → **Listo** o **Listo y escanear otra**.
+- **Escanear**: haz la foto → la app detecta los bordes de la hoja con **OpenCV** (se descarga la primera
+  vez, ~10 MB, y luego funciona sin conexión; si no está disponible usa su detector propio) (puedes ajustar las 4 esquinas con lupa) → pestaña **Resultado** para el filtro (Original, Nítido, Grises, Blanco y negro) y el giro → **Listo** o **Listo y escanear otra**.
 - **Imágenes**: elige varias fotos o archivos a la vez; se agregan como páginas.
 - Toca una página para editarla o cambiarla de posición (‹ ›).
 - **Calidad del PDF**: tamaño A4 / Carta / Oficio / ajustado a la imagen, márgenes y calidad (Máxima, Alta ≈300 ppp, Media, Compacta).
@@ -50,7 +51,9 @@ pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblio
 index.html            Interfaz
 styles.css            Estilos (modo claro y oscuro)
 js/app.js             Pantallas y flujo
-js/imaging.js         Detección de bordes, perspectiva, filtros y giros
+js/imaging.js         Perspectiva, filtros, giros y detector de bordes de respaldo
+js/opencv.js          Detección del documento con OpenCV.js (carga bajo demanda)
+js/vendor/opencv/     OpenCV.js 4.10.0 (Apache-2.0)
 js/pdf.js             Generador de PDF (JPEG incrustado sin recomprimir)
 js/pdftext.js         Lectura de PDF con pdf.js: texto y vista previa de páginas
 js/pdfedit.js         Edición de PDF con pdf-lib: combinar, organizar, dividir

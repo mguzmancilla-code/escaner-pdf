@@ -12,6 +12,7 @@ import {
   resizeJpeg,
 } from './imaging.js';
 import { PAGE_SIZES, buildPdf } from './pdf.js';
+import { cvReady, detectDocument, loadCV } from './opencv.js';
 
 const QUALITIES = {
   maximum: { label: 'Máxima', maxSide: Infinity, jpeg: 0.95, hint: 'Resolución original sin reducir. Archivos más grandes.' },
@@ -1217,6 +1218,7 @@ function insertPages() {
     {
       label: 'Escanear con la cámara',
       run: () => {
+        preloadCV();
         org.insertImages = 'camera';
         el.cameraInput.click();
       },
@@ -1247,7 +1249,7 @@ async function insertImageFiles(files, fromCamera) {
       busy('Agregando páginas…', { fraction: idx / files.length, sub: `Imagen ${idx + 1} de ${files.length}` });
       const img = await loadImage(file);
       // En cámara: detecta bordes y aplica el filtro nítido; en fotos, se usa la imagen completa.
-      const corners = fromCamera ? detectCorners(img) ?? FULL_FRAME : FULL_FRAME.map((p) => [...p]);
+      const corners = fromCamera ? (await findCorners(img)) ?? FULL_FRAME : FULL_FRAME.map((p) => [...p]);
       const canvas = renderPage(img, { corners, rotation: 0, filter: fromCamera ? 'sharp' : 'original' });
       const w = canvas.width;
       const h = canvas.height;
@@ -2486,7 +2488,31 @@ async function importPdfs(files) {
 // Nuevo PDF
 // ---------------------------------------------------------------------------
 
+/**
+ * Detecta el documento en la foto: primero con OpenCV (más preciso con fondos
+ * oscuros, sombras o bordes poco marcados) y, si no está disponible o no
+ * encuentra nada, con el detector propio de la app.
+ */
+async function findCorners(img) {
+  if (!cvReady()) busy('Preparando el detector de bordes (solo la primera vez)…');
+  try {
+    const corners = await detectDocument(img);
+    if (corners) return corners;
+  } catch (error) {
+    console.warn('OpenCV no disponible; se usa el detector propio:', error.message);
+  } finally {
+    busy('Detectando bordes…');
+  }
+  return detectCorners(img);
+}
+
+/** Empieza a descargar OpenCV en segundo plano (mientras se toma la foto). */
+function preloadCV() {
+  if (navigator.onLine !== false) loadCV().catch(() => {});
+}
+
 function newDraft() {
+  preloadCV();
   releaseDraft();
   state.draft = { pages: [], ownership: newDocOwnership() };
   el.docName.value = defaultName();
@@ -2552,7 +2578,7 @@ async function addFromCamera(file) {
   const page = makePage(file, true);
   try {
     const img = await loadImage(file);
-    page.corners = detectCorners(img) ?? FULL_FRAME;
+    page.corners = (await findCorners(img)) ?? FULL_FRAME;
     releaseImage(img);
   } catch (error) {
     busy(null);
@@ -3104,8 +3130,9 @@ function setup() {
   el.peRotR.addEventListener('click', () => rotatePage(1));
   el.peMoveL.addEventListener('click', () => movePage(-1));
   el.peMoveR.addEventListener('click', () => movePage(1));
-  el.autoBtn.addEventListener('click', () => {
-    const corners = detectCorners(state.pe.img);
+  el.autoBtn.addEventListener('click', async () => {
+    busy('Detectando bordes…');
+    const corners = await findCorners(state.pe.img).finally(() => busy(null));
     if (!corners) toast('No se encontraron bordes claros. Ajusta las esquinas a mano.');
     state.pe.corners = corners ?? FULL_FRAME.map((p) => [...p]);
     drawCrop();

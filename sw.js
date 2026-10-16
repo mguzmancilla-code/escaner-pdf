@@ -1,6 +1,6 @@
 // Service worker: guarda la app en caché para que funcione sin conexión.
 // Sube VERSION cada vez que publiques cambios.
-const VERSION = 'v27';
+const VERSION = 'v28';
 const CACHE = `escaner-pdf-${VERSION}`;
 const ASSETS = [
   './',
@@ -22,6 +22,7 @@ const ASSETS = [
   'js/db.js',
   'js/imaging.js',
   'js/pdf.js',
+  'js/opencv.js',
   'icons/logo.svg',
   'icons/icon-180.png',
   'icons/icon-192.png',
@@ -45,6 +46,20 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET' || new URL(request.url).origin !== location.origin) return;
+  // Librerías de terceros (js/vendor/): no cambian dentro de una versión, así que
+  // se sirven desde la caché sin volver a descargarlas (OpenCV pesa ~10 MB).
+  if (new URL(request.url).pathname.includes('/js/vendor/')) {
+    event.respondWith(
+      caches.open(CACHE).then(async (cache) => {
+        const cached = await cache.match(request, { ignoreSearch: true });
+        if (cached) return cached;
+        const response = await fetch(request);
+        if (response.ok) cache.put(request, response.clone());
+        return response;
+      }),
+    );
+    return;
+  }
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const cached = await cache.match(request, { ignoreSearch: true });
