@@ -6,8 +6,9 @@
   --text-2: #6c6c72;
   --text-3: #a1a1a8;
   --separator: rgba(60, 60, 67, 0.18);
-  --accent: #d6285a;
-  --accent-soft: rgba(214, 40, 90, 0.12);
+  --accent: #1a66e0; /* azul AgneScan */
+  --accent-2: #22c3e6; /* celeste AgneScan */
+  --accent-soft: rgba(26, 102, 224, 0.12);
   --danger: #e5332a;
   --bar: rgba(242, 242, 247, 0.86);
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
@@ -27,8 +28,8 @@
     --text-2: #98989f;
     --text-3: #636366;
     --separator: rgba(84, 84, 88, 0.6);
-    --accent: #ff4f7e;
-    --accent-soft: rgba(255, 79, 126, 0.16);
+    --accent: #3b86f7;
+    --accent-soft: rgba(59, 134, 247, 0.18);
     --danger: #ff453a;
     --bar: rgba(10, 10, 10, 0.86);
     --shadow: none;
@@ -196,7 +197,7 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 
 /* ---------- Editor de página ---------- */
 
-.screen.dark { background: #000; color: #fff; z-index: 5; --bar: rgba(20, 20, 20, 0.9); --separator: rgba(255, 255, 255, 0.12); --accent: #ff4f7e; }
+.screen.dark { background: #000; color: #fff; z-index: 5; --bar: rgba(20, 20, 20, 0.9); --separator: rgba(255, 255, 255, 0.12); --accent: #3b86f7; }
 .segmented { display: flex; margin: 10px 16px 0; padding: 2px; border-radius: 9px; background: rgba(118, 118, 128, 0.24); }
 .segmented button { flex: 1; padding: 6px 4px; border-radius: 7px; font-size: 14px; font-weight: 500; }
 .segmented button.active { background: #636366; color: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); }
@@ -207,7 +208,7 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .crop-box img { display: block; width: 100%; height: 100%; pointer-events: none; }
 .crop-box svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .crop-shade { fill: rgba(0, 0, 0, 0.45); }
-.crop-edge { fill: rgba(255, 79, 126, 0.12); stroke: #ff4f7e; stroke-width: 2.5; stroke-linejoin: round; }
+.crop-edge { fill: rgba(34, 195, 230, 0.14); stroke: #22c3e6; stroke-width: 2.5; stroke-linejoin: round; }
 .crop-handle { fill: rgba(255, 255, 255, 0.25); stroke: #fff; stroke-width: 3; }
 .preview { max-width: calc(100% - 32px); max-height: calc(100% - 32px); object-fit: contain; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); background: #fff; }
 .stage > .spinner { position: absolute; }
@@ -224,7 +225,7 @@ svg.icon { width: 22px; height: 22px; flex: none; }
   pointer-events: none;
   z-index: 10;
 }
-.loupe::before, .loupe::after { content: ""; position: absolute; background: #ff4f7e; }
+.loupe::before, .loupe::after { content: ""; position: absolute; background: #22c3e6; }
 .loupe::before { left: 50%; top: 35%; bottom: 35%; width: 2px; margin-left: -1px; }
 .loupe::after { top: 50%; left: 35%; right: 35%; height: 2px; margin-top: -1px; }
 
@@ -627,7 +628,7 @@ svg.icon { width: 22px; height: 22px; flex: none; }
   .side-nav { flex: 1; overflow-y: auto; padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 2px; }
   .side-scan {
     display: flex; align-items: center; justify-content: center; gap: 10px; margin: 2px 0 14px; min-height: 46px; border-radius: 12px;
-    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 75%, #ff8a3d)); color: #fff; font-weight: 700; font-size: 15px;
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #22c3e6)); color: #fff; font-weight: 700; font-size: 15px;
     box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent);
   }
   .side-heading { display: flex; align-items: center; justify-content: space-between; margin: 14px 8px 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
@@ -657,7 +658,7 @@ svg.icon { width: 22px; height: 22px; flex: none; }
   .side-profile > svg { width: 18px; height: 18px; color: var(--text-3); flex: none; }
   .avatar {
     display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; flex: none; font-size: 14px; font-weight: 700; color: #fff;
-    background: linear-gradient(135deg, #8b5cf6, var(--accent));
+    background: linear-gradient(135deg, #1d6fe8, #22c3e6);
   }
   .avatar.guest { background: var(--lib-card-2); color: var(--text-2); }
   .avatar svg { width: 20px; height: 20px; }

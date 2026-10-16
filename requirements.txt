@@ -1,0 +1,6 @@
+# Herramientas de desarrollo en Python para trabajar con imágenes del proyecto
+# (íconos, logos, pruebas de procesamiento). La app web NO las necesita: corre
+# en el navegador. Instalación:  python -m pip install -r requirements.txt
+Pillow>=12.3        # manipular, redimensionar, recortar y convertir imágenes
+numpy>=2.3          # operaciones matemáticas sobre imágenes
+opencv-python>=4.12 # bordes, corrección de perspectiva y optimización de imágenes

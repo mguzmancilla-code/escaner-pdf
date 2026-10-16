@@ -98,7 +98,7 @@ const state = {
 };
 
 // Colores de las tarjetas de carpeta (se asignan de forma estable por id).
-const FOLDER_COLORS = ['#ff4f7e', '#30a46c', '#6e56cf', '#0091ff', '#f76b15', '#12a594', '#e5484d', '#d6409f'];
+const FOLDER_COLORS = ['#1d6fe8', '#30a46c', '#6e56cf', '#f76b15', '#12a594', '#22c3e6', '#e5484d', '#d6409f'];
 function folderColor(id) {
   // Carpetas principales: un color distinto para cada una (por orden alfabético).
   const raiz = state.folders.filter((f) => !f.carpeta_padre_id).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
