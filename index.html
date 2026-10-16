@@ -28,16 +28,49 @@
       <button id="importPdfBtn" class="icon-btn" data-icon="plusCircle" aria-label="Agregar"></button>
     </header>
     <div class="lib-body">
-      <aside id="libSide" class="lib-side"></aside>
-      <div class="scroll">
-        <input id="search" class="search" type="search" placeholder="Buscar PDF" autocomplete="off">
+      <aside class="lib-side">
+        <div class="side-brand">
+          <span class="side-logo" data-icon="doc"></span>
+          <span class="side-brand-text"><strong>Mis PDF</strong><small>Espacio de documentos</small></span>
+          <span id="cloudBadge" class="cloud-badge" hidden>Nube</span>
+        </div>
+        <nav id="libSide" class="side-nav" aria-label="Menú"></nav>
+        <div class="side-foot">
+          <div id="storageBox" class="storage-box" hidden></div>
+          <button id="profileBtn" class="side-profile"></button>
+        </div>
+      </aside>
+      <div class="scroll lib-main">
+        <div class="lib-topbar">
+          <label class="search-wrap">
+            <span data-icon="search"></span>
+            <input id="search" class="search" type="search" placeholder="Buscar documentos o carpetas" autocomplete="off">
+          </label>
+          <button id="newFolderTop" class="top-btn" hidden><span data-icon="folderPlus"></span>Nueva carpeta</button>
+        </div>
         <nav id="crumbs" class="crumbs" aria-label="Ubicación" hidden></nav>
+        <div class="lib-head">
+          <h2 id="libHeading">Mis carpetas y documentos</h2>
+          <span id="libCount" class="lib-count"></span>
+        </div>
+        <p class="lib-lead">Organiza, visualiza y gestiona tus documentos digitalizados.</p>
         <div id="uploadBanner" class="banner" hidden>
           <span id="uploadBannerText"></span>
           <button id="uploadBannerBtn" class="text-btn strong">Subir</button>
         </div>
-        <ul id="folderList" class="doc-list"></ul>
+        <div class="section-row" id="folderHead" hidden>
+          <p class="section-title">Carpetas</p><span id="folderHeadCount" class="section-count"></span>
+        </div>
+        <ul id="folderList" class="folder-grid"></ul>
+        <div class="section-row" id="docHead" hidden>
+          <p class="section-title" id="docHeadTitle">Archivos</p><span id="docHeadCount" class="section-count"></span>
+        </div>
         <ul id="docList" class="doc-list"></ul>
+        <div id="dropZone" class="drop-zone">
+          <span data-icon="upload"></span>
+          <strong>Arrastra y suelta tus PDF aquí</strong>
+          <small>o haz clic para elegirlos</small>
+        </div>
         <div id="emptyState" class="empty" hidden>
           <div class="empty-icon" data-icon="scan"></div>
           <h2 id="emptyTitle">Aún no hay PDF</h2>
@@ -211,7 +244,12 @@
         <div class="empty-icon" data-icon="cloud"></div>
         <p class="auth-intro">Sesión iniciada como</p>
         <p id="accountEmail" class="account-email"></p>
-        <p class="hint center">La sesión queda abierta en este iPhone. Tus PDF nuevos se guardan también en la nube.</p>
+        <p class="hint">Tu nombre (se muestra en tu perfil)</p>
+        <div class="group">
+          <input id="profileName" class="row-input" type="text" placeholder="Nombre y apellido" autocomplete="name" maxlength="60">
+        </div>
+        <button id="profileNameSave" class="btn auth-submit" type="button">Guardar nombre</button>
+        <p class="hint center">La sesión queda abierta en este dispositivo. Tus PDF nuevos se guardan también en la nube.</p>
         <button id="signOutBtn" class="btn auth-submit danger-text">Cerrar sesión</button>
       </div>
     </div>

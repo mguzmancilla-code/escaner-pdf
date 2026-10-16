@@ -54,6 +54,12 @@ const ICONS = {
   redactbox: '<rect x="4" y="6" width="16" height="12" rx="1" fill="currentColor"/>',
   signature: '<path d="M4 17c3 0 3-10 6-10s0 10 3 10 2-6 4-6 2 2 3 2"/>',
   stamp: '<rect x="5" y="14" width="14" height="6" rx="1"/><path d="M12 14V9M9 4h6a2 2 0 0 1 2 2c0 2-2 2-2 3H9c0-1-2-1-2-3a2 2 0 0 1 2-2z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  folderPlus: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6M9 13h6"/>',
+  upload: '<path d="M7 18h10.5a4.5 4.5 0 0 0 .6-8.96A6 6 0 0 0 6.34 10.1 4 4 0 0 0 7 18zM12 16v-5M9.5 13.5 12 11l2.5 2.5"/>',
+  files: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10h18"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
 
 const icon = (name) =>
@@ -64,6 +70,8 @@ const el = {};
 for (const id of [
   'library', 'libraryTitle', 'libSide', 'search', 'crumbs', 'uploadBanner', 'uploadBannerText', 'uploadBannerBtn',
   'folderList', 'docList', 'emptyState', 'emptyTitle', 'emptyText', 'scanBtn', 'imagesBtn', 'importPdfBtn',
+  'cloudBadge', 'storageBox', 'profileBtn', 'newFolderTop', 'libHeading', 'libCount', 'folderHead', 'folderHeadCount',
+  'docHead', 'docHeadTitle', 'docHeadCount', 'dropZone',
   'editor', 'editorCancel', 'editorCreate', 'docName', 'destHint', 'pageCount', 'pageGrid', 'pagesHint', 'moveBtn',
   'addCameraBtn', 'addImagesBtn', 'pageSize', 'quality', 'margins', 'filterAll', 'qualityHint',
   'pageEditor', 'peCancel', 'peDone', 'peTitle', 'peTabs', 'peStage', 'cropBox', 'cropImg', 'cropSvg',
@@ -85,7 +93,20 @@ const state = {
   user: null, // usuario de Supabase con sesión iniciada
   folders: [], // carpetas de la nube
   folderId: null, // carpeta abierta en «Mis PDF» (null = raíz)
+  view: 'all', // 'all' = por carpetas, 'recent' = todos los documentos por fecha
 };
+
+// Colores de las tarjetas de carpeta (se asignan de forma estable por id).
+const FOLDER_COLORS = ['#ff4f7e', '#30a46c', '#6e56cf', '#0091ff', '#f76b15', '#12a594', '#e5484d', '#d6409f'];
+function folderColor(id) {
+  // Carpetas principales: un color distinto para cada una (por orden alfabético).
+  const raiz = state.folders.filter((f) => !f.carpeta_padre_id).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  const i = raiz.findIndex((f) => f.id === id);
+  if (i >= 0) return FOLDER_COLORS[i % FOLDER_COLORS.length];
+  let h = 2166136261; // subcarpetas: color estable según su id (FNV-1a)
+  for (const c of String(id)) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  return FOLDER_COLORS[(h >>> 0) % FOLDER_COLORS.length];
+}
 
 const thumbUrls = new Map(); // id de documento → URL de la miniatura
 let viewerUrls = [];
@@ -199,24 +220,39 @@ function renderLibrary() {
   const query = el.search.value.trim().toLowerCase();
   const inCloud = signedIn();
   const searching = Boolean(query);
-  const folderId = inCloud ? state.folderId : null;
+  const recent = state.view === 'recent' && !searching;
+  const folderId = inCloud && !recent ? state.folderId : null;
   const allDocs = visibleDocs();
 
   const docs = allDocs
-    .filter((doc) =>
-      searching ? doc.name.toLowerCase().includes(query) : !inCloud || (doc.carpetaId ?? null) === folderId,
-    )
+    .filter((doc) => {
+      if (searching) return doc.name.toLowerCase().includes(query);
+      if (recent || !inCloud) return true;
+      return (doc.carpetaId ?? null) === folderId;
+    })
     .sort((a, b) => b.created - a.created);
-  const folders =
-    inCloud && !searching
-      ? state.folders
-          .filter((f) => (f.carpeta_padre_id ?? null) === folderId)
-          .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
-      : [];
+  const folders = !inCloud || recent
+    ? []
+    : state.folders
+        .filter((f) => (searching ? f.nombre.toLowerCase().includes(query) : (f.carpeta_padre_id ?? null) === folderId))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 
-  // Título y ruta de carpetas
-  const path = inCloud ? folderPath(folderId) : [];
-  el.libraryTitle.textContent = path.at(-1)?.nombre ?? 'Mis PDF';
+  // Títulos y ruta de carpetas
+  const path = inCloud && !recent ? folderPath(folderId) : [];
+  const titulo = recent ? 'Recientes' : path.at(-1)?.nombre ?? 'Mis PDF';
+  el.libraryTitle.textContent = titulo;
+  el.libHeading.textContent = searching
+    ? 'Resultados de búsqueda'
+    : recent
+      ? 'Documentos recientes'
+      : path.length
+        ? path.at(-1).nombre
+        : 'Mis carpetas y documentos';
+  const partes = [];
+  if (folders.length) partes.push(folders.length === 1 ? '1 carpeta' : `${folders.length} carpetas`);
+  partes.push(docs.length === 1 ? '1 archivo' : `${docs.length} archivos`);
+  el.libCount.textContent = partes.join(', ');
+
   el.crumbs.hidden = !path.length || searching;
   el.crumbs.replaceChildren(
     ...[{ id: null, nombre: 'Mis PDF' }, ...path].flatMap((folder, i, list) => {
@@ -227,67 +263,226 @@ function renderLibrary() {
     }),
   );
 
-  // Aviso para subir los PDF que solo están en este iPhone
+  // Aviso para subir los PDF que solo están en este dispositivo
   const localOnly = inCloud ? allDocs.filter((doc) => !doc.userId).length : 0;
   el.uploadBanner.hidden = !localOnly;
   el.uploadBannerText.textContent =
-    localOnly === 1 ? '1 PDF está solo en este iPhone.' : `${localOnly} PDF están solo en este iPhone.`;
+    localOnly === 1 ? '1 PDF está solo en este dispositivo.' : `${localOnly} PDF están solo en este dispositivo.`;
 
-  el.folderList.replaceChildren(...folders.map(folderRow));
-  el.docList.replaceChildren(...docs.map((doc) => docRow(doc, searching && inCloud)));
+  el.folderHead.hidden = !folders.length;
+  el.folderHeadCount.textContent = folders.length === 1 ? '1 carpeta' : `${folders.length} carpetas`;
+  el.folderList.replaceChildren(...folders.map(folderCard));
 
+  el.docHead.hidden = !docs.length;
+  el.docHeadTitle.textContent = searching ? 'Archivos encontrados' : recent ? 'Por fecha' : 'Archivos';
+  el.docHeadCount.textContent = docs.length === 1 ? '1 archivo' : `${docs.length} archivos`;
+  el.docList.replaceChildren(...docs.map((doc) => docRow(doc, (searching || recent) && inCloud)));
+
+  el.newFolderTop.hidden = !inCloud || recent;
   const empty = !docs.length && !folders.length;
   renderLibSide();
   el.emptyState.hidden = !empty;
   if (searching) {
     el.emptyTitle.textContent = 'Sin resultados';
-    el.emptyText.textContent = 'No hay PDF con ese nombre.';
+    el.emptyText.textContent = 'No hay documentos ni carpetas con ese nombre.';
   } else if (folderId) {
     el.emptyTitle.textContent = 'Carpeta vacía';
-    el.emptyText.textContent = 'Escanea o agrega imágenes estando aquí para guardarlas en esta carpeta.';
+    el.emptyText.textContent = 'Escanea, agrega imágenes o arrastra PDF estando aquí para guardarlos en esta carpeta.';
   } else {
     el.emptyTitle.textContent = 'Aún no hay PDF';
     el.emptyText.textContent = 'Escanea un documento con la cámara o convierte imágenes de tu galería en un PDF de alta calidad.';
   }
-  el.search.hidden = !allDocs.length && !state.folders.length;
 }
 
-/** Menú lateral fijo de la biblioteca (visible en computador). */
+/** Fecha corta y relativa: «Hoy, 10:45», «Ayer, 18:20», «hace 4 días» o la fecha. */
+function relDate(ts) {
+  const d = new Date(ts);
+  const hoy = new Date();
+  const dias = Math.round((new Date(hoy.toDateString()) - new Date(d.toDateString())) / 86_400_000);
+  const hora = d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  if (dias <= 0) return `Hoy, ${hora}`;
+  if (dias === 1) return `Ayer, ${hora}`;
+  if (dias < 7) return `hace ${dias} días`;
+  if (dias < 30) return dias < 14 ? 'hace 1 semana' : `hace ${Math.floor(dias / 7)} semanas`;
+  return d.toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** Iniciales para el avatar del perfil (nombre si existe; si no, el correo). */
+function initials(user) {
+  const nombre = user.user_metadata?.full_name || user.user_metadata?.name;
+  if (nombre) return nombre.split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
+  return user.email.split('@')[0].replace(/[^a-z0-9]/gi, '').slice(0, 2).toUpperCase() || '?';
+}
+
+const STORAGE_LIMIT = 1024 ** 3; // 1 GB: almacenamiento del plan gratuito de Supabase
+
+/** Menú lateral de la biblioteca (visible en computador): acciones, navegación, carpetas, perfil. */
 function renderLibSide() {
-  const acciones = [
-    { icon: 'camera', label: 'Escanear', primary: true, run: () => { newDraft(); el.cameraInput.click(); } },
-    { icon: 'photo', label: 'Imágenes', run: () => { newDraft(); el.imagesInput.click(); } },
-    { icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() },
-    { icon: 'combine', label: 'Combinar PDF', run: openCombine },
-  ];
-  if (signedIn()) acciones.splice(2, 0, { icon: 'folder', label: 'Nueva carpeta', run: newFolder });
-  el.libSide.replaceChildren(
-    ...acciones.map((a) => {
-      const b = document.createElement('button');
-      b.className = `lib-action${a.primary ? ' primary' : ''}`;
-      b.innerHTML = `${icon(a.icon)}<span>${a.label}</span>`;
-      b.addEventListener('click', a.run);
-      return b;
+  const inCloud = signedIn();
+  const docs = visibleDocs();
+  const nodes = [];
+
+  const boton = ({ icon: ic, label, run, active, count, dot, cls = 'side-item' }) => {
+    const b = document.createElement('button');
+    b.className = `${cls}${active ? ' active' : ''}`;
+    b.innerHTML = `${dot ? `<span class="side-dot" style="--dot:${dot}"></span>` : icon(ic)}<span class="side-label"></span>${
+      count != null ? `<span class="side-count">${count}</span>` : ''
+    }`;
+    b.querySelector('.side-label').textContent = label;
+    b.addEventListener('click', run);
+    return b;
+  };
+  const titulo = (texto, extra) => {
+    const p = document.createElement('div');
+    p.className = 'side-heading';
+    p.innerHTML = '<span></span>';
+    p.firstChild.textContent = texto;
+    if (extra) p.append(extra);
+    return p;
+  };
+
+  nodes.push(
+    boton({
+      icon: 'camera',
+      label: 'Escanear documento',
+      cls: 'side-scan',
+      run: () => {
+        newDraft();
+        el.cameraInput.click();
+      },
     }),
   );
+
+  nodes.push(titulo('Herramientas PDF'));
+  nodes.push(boton({ icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() }));
+  nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
+  nodes.push(
+    boton({
+      icon: 'photo',
+      label: 'Imágenes a PDF',
+      run: () => {
+        newDraft();
+        el.imagesInput.click();
+      },
+    }),
+  );
+
+  nodes.push(titulo('Navegación'));
+  nodes.push(
+    boton({
+      icon: 'files',
+      label: 'Todos los archivos',
+      count: docs.length,
+      active: state.view === 'all' && !state.folderId,
+      run: () => {
+        state.view = 'all';
+        openFolder(null);
+      },
+    }),
+  );
+  nodes.push(
+    boton({
+      icon: 'clock',
+      label: 'Recientes',
+      active: state.view === 'recent',
+      run: () => {
+        state.view = 'recent';
+        el.search.value = '';
+        renderLibrary();
+        el.library.querySelector('.scroll').scrollTop = 0;
+      },
+    }),
+  );
+
+  if (inCloud) {
+    const mas = document.createElement('button');
+    mas.className = 'side-heading-btn';
+    mas.setAttribute('aria-label', 'Nueva carpeta');
+    mas.innerHTML = icon('folderPlus');
+    mas.addEventListener('click', newFolder);
+    nodes.push(titulo('Mis carpetas', mas));
+    const raiz = state.folders
+      .filter((f) => !f.carpeta_padre_id)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    const abiertas = new Set(folderPath(state.folderId).map((f) => f.id));
+    for (const f of raiz) {
+      nodes.push(
+        boton({
+          dot: folderColor(f.id),
+          label: f.nombre,
+          count: docs.filter((d) => d.carpetaId === f.id).length,
+          active: state.view === 'all' && abiertas.has(f.id),
+          run: () => {
+            state.view = 'all';
+            openFolder(f.id);
+          },
+        }),
+      );
+    }
+    if (!raiz.length) {
+      const vacio = document.createElement('p');
+      vacio.className = 'side-empty';
+      vacio.textContent = 'Aún no tienes carpetas.';
+      nodes.push(vacio);
+    }
+  }
+  el.libSide.replaceChildren(...nodes);
+
+  // Insignia «Nube», almacenamiento y perfil
+  el.cloudBadge.hidden = !inCloud;
+  el.storageBox.hidden = !inCloud;
+  if (inCloud) {
+    const usado = docs.filter((d) => d.userId).reduce((s, d) => s + (d.size || 0), 0);
+    const pct = Math.min(100, (usado / STORAGE_LIMIT) * 100);
+    el.storageBox.innerHTML = `
+      <div class="storage-row"><span>Almacenamiento</span><strong>${formatSize(usado)} / 1 GB</strong></div>
+      <div class="storage-bar"><span style="width:${Math.max(pct, 1).toFixed(1)}%"></span></div>
+      <div class="storage-row small"><span>${pct < 1 ? '< 1' : Math.round(pct)}% utilizado</span></div>`;
+  }
+  const user = state.user;
+  if (user) {
+    const nombre = user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0];
+    el.profileBtn.innerHTML = `
+      <span class="avatar">${initials(user)}</span>
+      <span class="profile-meta"><strong></strong><small></small></span>
+      ${icon('settings')}`;
+    el.profileBtn.querySelector('strong').textContent = nombre;
+    el.profileBtn.querySelector('small').textContent = user.email;
+    el.profileBtn.setAttribute('aria-label', `Cuenta: ${user.email}`);
+  } else {
+    el.profileBtn.innerHTML = `
+      <span class="avatar guest">${icon('user')}</span>
+      <span class="profile-meta"><strong>Iniciar sesión</strong><small>Guarda tus PDF en la nube</small></span>`;
+    el.profileBtn.setAttribute('aria-label', 'Iniciar sesión');
+  }
 }
 
 function docRow(doc, showFolder) {
   const li = document.createElement('li');
   const url = thumbUrl(doc);
   li.innerHTML = `
-    <button class="doc-row">
-      ${url ? `<img class="thumb" alt="" src="${url}">` : `<span class="thumb">${icon('doc')}</span>`}
+    <div class="doc-row" role="button" tabindex="0">
+      ${url ? `<img class="thumb" alt="" src="${url}">` : `<span class="thumb pdf-thumb">${icon('doc')}<b>PDF</b></span>`}
       <span class="meta">
-        <span class="name"></span>
-        <span class="sub">${pagesText(doc.pageCount)} · ${formatSize(doc.size)}</span>
+        <span class="name-line"><span class="name"></span></span>
+        <span class="sub"></span>
         <span class="date"></span>
       </span>
-      <span class="icon-btn" role="button" aria-label="Compartir" data-share>${icon('share')}</span>
-    </button>`;
+      <span class="row-actions">
+        <button class="row-btn view-btn" data-open>${icon('expand')}<span>Visualizar</span></button>
+        <button class="icon-btn" aria-label="Compartir" data-share>${icon('share')}</button>
+        <button class="icon-btn desk-only" aria-label="Descargar" data-download>${icon('download')}</button>
+      </span>
+    </div>`;
   li.querySelector('.name').textContent = doc.name;
-  const details = [dateFormat.format(doc.created)];
-  if (showFolder) details.push(folderLabel(doc.carpetaId));
+  if (signedIn() && doc.estadoOcr === 'pendiente') {
+    li.querySelector('.name-line').insertAdjacentHTML('beforeend', '<span class="tag warn">OCR pendiente</span>');
+  }
+  const sub = [];
+  if (showFolder) sub.push(folderLabel(doc.carpetaId));
+  sub.push(pagesText(doc.pageCount), formatSize(doc.size));
+  li.querySelector('.sub').textContent = sub.join(' · ');
+  const details = [relDate(doc.created)];
   if (signedIn() && SYNC_LABELS[doc.sync] && doc.userId) details.push(SYNC_LABELS[doc.sync]);
   const date = li.querySelector('.date');
   date.textContent = details.join(' · ');
@@ -296,29 +491,45 @@ function docRow(doc, showFolder) {
     if (event.target.closest('[data-share]')) {
       if (doc.pdf) sharePdf(doc);
       else openViewer(doc); // hay que descargarlo antes de poder compartirlo
+    } else if (event.target.closest('[data-download]')) {
+      if (doc.pdf) downloadPdf(doc);
+      else openViewer(doc);
     } else {
       openViewer(doc);
     }
   });
+  li.querySelector('.doc-row').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') openViewer(doc);
+  });
   return li;
 }
 
-function folderRow(folder) {
+/** Tarjeta de carpeta (cuadrícula en computador, lista compacta en el teléfono). */
+function folderCard(folder) {
   const li = document.createElement('li');
-  const docs = visibleDocs().filter((doc) => doc.carpetaId === folder.id).length;
+  const suyos = visibleDocs().filter((doc) => doc.carpetaId === folder.id);
   const subfolders = state.folders.filter((f) => f.carpeta_padre_id === folder.id).length;
-  const parts = [docs === 1 ? '1 documento' : `${docs} documentos`];
-  if (subfolders) parts.push(subfolders === 1 ? '1 carpeta' : `${subfolders} carpetas`);
+  const parts = [suyos.length === 1 ? '1 documento' : `${suyos.length} documentos`];
+  if (subfolders) parts.push(subfolders === 1 ? '1 subcarpeta' : `${subfolders} subcarpetas`);
+  const ultimo = suyos.reduce((m, d) => Math.max(m, d.created || 0), 0);
   li.innerHTML = `
-    <button class="doc-row folder-row">
-      <span class="thumb folder-thumb">${icon('folder')}</span>
-      <span class="meta"><span class="name"></span><span class="sub">${parts.join(' · ')}</span></span>
-      <span class="icon-btn" role="button" aria-label="Opciones de la carpeta" data-more>${icon('more')}</span>
-    </button>`;
-  li.querySelector('.name').textContent = folder.nombre;
-  li.querySelector('.doc-row').addEventListener('click', (event) => {
+    <div class="folder-card" role="button" tabindex="0" style="--fc:${folderColor(folder.id)}">
+      <span class="fc-top">
+        <span class="fc-icon">${icon('folder')}</span>
+        <button class="icon-btn fc-more" aria-label="Opciones de la carpeta" data-more>${icon('more')}</button>
+      </span>
+      <span class="fc-name"></span>
+      <span class="fc-sub">${parts.join(' · ')}</span>
+      <span class="fc-foot">${ultimo ? `Último archivo: ${relDate(ultimo)}` : 'Sin archivos'}</span>
+    </div>`;
+  li.querySelector('.fc-name').textContent = folder.nombre;
+  const card = li.querySelector('.folder-card');
+  card.addEventListener('click', (event) => {
     if (event.target.closest('[data-more]')) folderMenu(folder);
     else openFolder(folder.id);
+  });
+  card.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') openFolder(folder.id);
   });
   return li;
 }
@@ -355,6 +566,7 @@ function folderTree() {
 }
 
 function openFolder(id) {
+  state.view = 'all';
   state.folderId = id;
   el.search.value = '';
   renderLibrary();
@@ -2669,6 +2881,40 @@ function setup() {
   });
   el.importPdfBtn.addEventListener('click', addMenu);
   el.uploadBannerBtn.addEventListener('click', uploadLocalDocs);
+  el.profileBtn.addEventListener('click', () => $('accountBtn').click());
+  el.newFolderTop.addEventListener('click', newFolder);
+  el.dropZone.addEventListener('click', () => el.pdfInput.click());
+
+  // Arrastrar y soltar (computador): PDF se importan; imágenes crean un PDF nuevo.
+  let dragDepth = 0;
+  const conArchivos = (event) => [...(event.dataTransfer?.types ?? [])].includes('Files');
+  el.library.addEventListener('dragenter', (event) => {
+    if (!conArchivos(event) || el.library.hidden) return;
+    event.preventDefault();
+    dragDepth++;
+    el.library.classList.add('dragging');
+  });
+  el.library.addEventListener('dragover', (event) => {
+    if (conArchivos(event)) event.preventDefault();
+  });
+  el.library.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) el.library.classList.remove('dragging');
+  });
+  el.library.addEventListener('drop', (event) => {
+    if (!conArchivos(event)) return;
+    event.preventDefault();
+    dragDepth = 0;
+    el.library.classList.remove('dragging');
+    const files = [...event.dataTransfer.files];
+    const pdfs = files.filter((f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+    const imagenes = files.filter((f) => f.type.startsWith('image/'));
+    if (pdfs.length) importPdfs(pdfs);
+    else if (imagenes.length) {
+      newDraft();
+      addFromLibrary(imagenes);
+    } else toast('Solo se pueden soltar PDF o imágenes.');
+  });
 
   // Entradas de archivo
   el.cameraInput.addEventListener('change', () => {
@@ -2866,14 +3112,31 @@ async function setupAccount() {
     ui.authForm.hidden = Boolean(user);
     ui.accountInfo.hidden = !user;
     ui.accountEmail.textContent = user?.email ?? '';
+    $('profileName').value = user?.user_metadata?.full_name ?? '';
 
     const changed = state.user?.id !== user?.id;
     state.user = user;
-    if (!changed) return;
+    if (!changed) {
+      renderLibSide(); // p. ej., cambió el nombre del perfil
+      return;
+    }
     state.folders = [];
     state.folderId = null;
     renderLibrary();
     if (user) syncNow();
+  });
+
+  $('profileNameSave').addEventListener('click', async () => {
+    const nombre = $('profileName').value.trim();
+    busy('Guardando nombre…');
+    try {
+      await auth.updateName(nombre);
+      toast(nombre ? 'Nombre guardado' : 'Nombre quitado');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      busy(null);
+    }
   });
 
   ui.authForm.addEventListener('submit', async (event) => {

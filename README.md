@@ -33,6 +33,9 @@ pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblio
 - **Exportar a imagen** (visor › **⋯**): cada página a PNG o JPEG (varias páginas salen en un ZIP).
 - **Convertir** (visor › **⋯**): a Word (.docx, texto editable), Excel (.xlsx, texto por filas) o
   PowerPoint (.pptx, cada página como imagen). Word/Excel trasladan el texto, no el diseño exacto.
+- **Computador (panel)**: menú lateral con Escanear, herramientas PDF, Todos los archivos, Recientes,
+  tus carpetas (con colores), almacenamiento usado y **tu perfil** abajo (toca para ver la cuenta y poner
+  tu nombre). Las carpetas se ven como tarjetas y puedes **arrastrar y soltar** PDF o imágenes.
 - **Sin conexión**: puedes seguir escaneando; los PDF quedan pendientes y se suben solos al volver la conexión.
 
 > Sin sesión iniciada, los PDF quedan solo dentro de la app en este iPhone. Con sesión, también quedan en la nube.

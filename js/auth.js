@@ -43,6 +43,14 @@ export async function signUp(email, password) {
   return Boolean(data.session);
 }
 
+/** Guarda el nombre visible del usuario (en los metadatos de su cuenta). */
+export async function updateName(nombre) {
+  const { data, error } = await supabase.auth.updateUser({ data: { full_name: nombre } });
+  if (error) throw new Error(explain(error));
+  currentUser = data.user;
+  listeners.forEach((listener) => listener(currentUser));
+}
+
 export async function signOut() {
   // scope 'local': cierra la sesión en este iPhone aunque no haya conexión.
   const { error } = await supabase.auth.signOut({ scope: 'local' });
