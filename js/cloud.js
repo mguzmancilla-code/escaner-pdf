@@ -67,14 +67,21 @@ export async function deleteFolder(id) {
 // Documentos
 // -----------------------------------------------------------------------------
 
+const DOC_COLS =
+  'id, nombre, carpeta_id, origen, estado_ocr, paginas, version_actual, miniatura_path, created_at, ' +
+  'documento_versiones (numero, storage_path, tamano_bytes)';
+
+// Si la columna «favorito» aún no existe (migración pendiente), se sigue sin ella.
+let hasFavorito = true;
+
 export async function fetchDocuments() {
-  const { data, error } = await supabase
-    .from('documentos')
-    .select(
-      'id, nombre, carpeta_id, origen, estado_ocr, paginas, version_actual, miniatura_path, created_at, ' +
-        'documento_versiones (numero, storage_path, tamano_bytes)',
-    )
-    .order('created_at', { ascending: false });
+  const consulta = (cols) =>
+    supabase.from('documentos').select(cols).order('created_at', { ascending: false });
+  let { data, error } = await consulta(hasFavorito ? `${DOC_COLS}, favorito` : DOC_COLS);
+  if (error && hasFavorito && /favorito/.test(error.message ?? '')) {
+    hasFavorito = false;
+    ({ data, error } = await consulta(DOC_COLS));
+  }
   check(error, 'No se pudieron cargar los documentos');
   return data.map((row) => {
     const versions = row.documento_versiones ?? [];
@@ -136,6 +143,11 @@ export async function uploadDocument(doc) {
     { onConflict: 'documento_id,numero' },
   ));
   check(error, 'No se pudo registrar la versión');
+
+  // Favorito marcado antes de subir (si la columna aún no existe, se omite sin fallar).
+  if (doc.favorito && hasFavorito) {
+    await supabase.from('documentos').update({ favorito: true }).eq('id', doc.id);
+  }
 
   return { remotePath, thumbPath };
 }
@@ -249,6 +261,15 @@ export async function runOcr(pdfBlob) {
 }
 
 /** Guarda en la nube el texto reconocido y el estado de OCR de un documento. */
+/** Marca o desmarca un documento como favorito. */
+export async function setFavorite(id, favorito) {
+  if (!hasFavorito) throw new Error('Falta activar Favoritos en la base de datos (migración pendiente).');
+  const { error } = await supabase.from('documentos').update({ favorito }).eq('id', id);
+  check(error, 'No se pudo guardar el favorito');
+}
+
+export const favoritesEnabled = () => hasFavorito;
+
 export async function setOcr(id, texto, estado) {
   const { error } = await supabase.from('documentos').update({ texto_ocr: texto, estado_ocr: estado }).eq('id', id);
   check(error, 'No se pudo guardar el texto reconocido');

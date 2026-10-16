@@ -36,6 +36,9 @@ pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblio
 - **Computador (panel)**: menú lateral con Escanear, herramientas PDF, Todos los archivos, Recientes,
   tus carpetas (con colores), almacenamiento usado y **tu perfil** abajo (toca para ver la cuenta y poner
   tu nombre). Las carpetas se ven como tarjetas y puedes **arrastrar y soltar** PDF o imágenes.
+- **Favoritos**: toca la estrella ☆ de un documento (en la lista, en el visor o en su menú ⋯) para
+  marcarlo como importante. Aparecen arriba en «Mis PDF» y en **Favoritos** del menú lateral; se sincronizan
+  entre dispositivos (requiere la migración `20261016120000_favoritos.sql`).
 - **Sin conexión**: puedes seguir escaneando; los PDF quedan pendientes y se suben solos al volver la conexión.
 
 > Sin sesión iniciada, los PDF quedan solo dentro de la app en este iPhone. Con sesión, también quedan en la nube.

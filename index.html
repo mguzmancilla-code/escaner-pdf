@@ -58,6 +58,10 @@
           <span id="uploadBannerText"></span>
           <button id="uploadBannerBtn" class="text-btn strong">Subir</button>
         </div>
+        <div class="section-row" id="favHead" hidden>
+          <p class="section-title">★ Favoritos</p><span id="favHeadCount" class="section-count"></span>
+        </div>
+        <ul id="favList" class="fav-list"></ul>
         <div class="section-row" id="folderHead" hidden>
           <p class="section-title">Carpetas</p><span id="folderHeadCount" class="section-count"></span>
         </div>
@@ -166,6 +170,7 @@
     <div id="viewerPages" class="scroll viewer-pages"></div>
     <footer class="bottom-actions">
       <button id="shareBtn" class="btn primary"><span data-icon="share"></span>Compartir / Guardar</button>
+      <button id="favBtn" class="icon-btn boxed fav-btn" data-icon="star" aria-label="Agregar a favoritos"></button>
       <button id="moveBtn" class="icon-btn boxed" data-icon="folder" aria-label="Mover a otra carpeta" hidden></button>
       <button id="downloadBtn" class="icon-btn boxed" data-icon="download" aria-label="Descargar"></button>
       <button id="deleteBtn" class="icon-btn boxed danger" data-icon="trash" aria-label="Eliminar"></button>

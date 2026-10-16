@@ -54,6 +54,7 @@ const ICONS = {
   redactbox: '<rect x="4" y="6" width="16" height="12" rx="1" fill="currentColor"/>',
   signature: '<path d="M4 17c3 0 3-10 6-10s0 10 3 10 2-6 4-6 2 2 3 2"/>',
   stamp: '<rect x="5" y="14" width="14" height="6" rx="1"/><path d="M12 14V9M9 4h6a2 2 0 0 1 2 2c0 2-2 2-2 3H9c0-1-2-1-2-3a2 2 0 0 1 2-2z"/>',
+  star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8-4.2-4.1 5.9-.9z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   folderPlus: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6M9 13h6"/>',
   upload: '<path d="M7 18h10.5a4.5 4.5 0 0 0 .6-8.96A6 6 0 0 0 6.34 10.1 4 4 0 0 0 7 18zM12 16v-5M9.5 13.5 12 11l2.5 2.5"/>',
@@ -71,7 +72,7 @@ for (const id of [
   'library', 'libraryTitle', 'libSide', 'search', 'crumbs', 'uploadBanner', 'uploadBannerText', 'uploadBannerBtn',
   'folderList', 'docList', 'emptyState', 'emptyTitle', 'emptyText', 'scanBtn', 'imagesBtn', 'importPdfBtn',
   'cloudBadge', 'storageBox', 'profileBtn', 'newFolderTop', 'libHeading', 'libCount', 'folderHead', 'folderHeadCount',
-  'docHead', 'docHeadTitle', 'docHeadCount', 'dropZone',
+  'docHead', 'docHeadTitle', 'docHeadCount', 'dropZone', 'favHead', 'favHeadCount', 'favList', 'favBtn',
   'editor', 'editorCancel', 'editorCreate', 'docName', 'destHint', 'pageCount', 'pageGrid', 'pagesHint', 'moveBtn',
   'addCameraBtn', 'addImagesBtn', 'pageSize', 'quality', 'margins', 'filterAll', 'qualityHint',
   'pageEditor', 'peCancel', 'peDone', 'peTitle', 'peTabs', 'peStage', 'cropBox', 'cropImg', 'cropSvg',
@@ -221,33 +222,39 @@ function renderLibrary() {
   const inCloud = signedIn();
   const searching = Boolean(query);
   const recent = state.view === 'recent' && !searching;
-  const folderId = inCloud && !recent ? state.folderId : null;
+  const fav = state.view === 'fav' && !searching;
+  const flat = recent || fav; // vistas sin carpetas: todos los documentos juntos
+  const folderId = inCloud && !flat ? state.folderId : null;
   const allDocs = visibleDocs();
+  const favoritos = allDocs.filter((doc) => doc.favorito).sort((a, b) => a.name.localeCompare(b.name, 'es'));
 
-  const docs = allDocs
-    .filter((doc) => {
-      if (searching) return doc.name.toLowerCase().includes(query);
-      if (recent || !inCloud) return true;
-      return (doc.carpetaId ?? null) === folderId;
-    })
-    .sort((a, b) => b.created - a.created);
-  const folders = !inCloud || recent
+  const docs = fav
+    ? favoritos
+    : allDocs
+        .filter((doc) => {
+          if (searching) return doc.name.toLowerCase().includes(query);
+          if (recent || !inCloud) return true;
+          return (doc.carpetaId ?? null) === folderId;
+        })
+        .sort((a, b) => b.created - a.created);
+  const folders = !inCloud || flat
     ? []
     : state.folders
         .filter((f) => (searching ? f.nombre.toLowerCase().includes(query) : (f.carpeta_padre_id ?? null) === folderId))
         .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 
   // Títulos y ruta de carpetas
-  const path = inCloud && !recent ? folderPath(folderId) : [];
-  const titulo = recent ? 'Recientes' : path.at(-1)?.nombre ?? 'Mis PDF';
-  el.libraryTitle.textContent = titulo;
+  const path = inCloud && !flat ? folderPath(folderId) : [];
+  el.libraryTitle.textContent = recent ? 'Recientes' : fav ? 'Favoritos' : path.at(-1)?.nombre ?? 'Mis PDF';
   el.libHeading.textContent = searching
     ? 'Resultados de búsqueda'
     : recent
       ? 'Documentos recientes'
-      : path.length
-        ? path.at(-1).nombre
-        : 'Mis carpetas y documentos';
+      : fav
+        ? 'Favoritos'
+        : path.length
+          ? path.at(-1).nombre
+          : 'Mis carpetas y documentos';
   const partes = [];
   if (folders.length) partes.push(folders.length === 1 ? '1 carpeta' : `${folders.length} carpetas`);
   partes.push(docs.length === 1 ? '1 archivo' : `${docs.length} archivos`);
@@ -269,28 +276,84 @@ function renderLibrary() {
   el.uploadBannerText.textContent =
     localOnly === 1 ? '1 PDF está solo en este dispositivo.' : `${localOnly} PDF están solo en este dispositivo.`;
 
+  // Acceso rápido a favoritos al inicio (en el teléfono es la forma de llegar a ellos)
+  const favRapido = !searching && !flat && !folderId && favoritos.length > 0;
+  el.favHead.hidden = !favRapido;
+  el.favHeadCount.textContent = favoritos.length === 1 ? '1 favorito' : `${favoritos.length} favoritos`;
+  el.favList.replaceChildren(...(favRapido ? favoritos.map(favChip) : []));
+
   el.folderHead.hidden = !folders.length;
   el.folderHeadCount.textContent = folders.length === 1 ? '1 carpeta' : `${folders.length} carpetas`;
   el.folderList.replaceChildren(...folders.map(folderCard));
 
   el.docHead.hidden = !docs.length;
-  el.docHeadTitle.textContent = searching ? 'Archivos encontrados' : recent ? 'Por fecha' : 'Archivos';
+  el.docHeadTitle.textContent = searching
+    ? 'Archivos encontrados'
+    : recent
+      ? 'Por fecha'
+      : fav
+        ? 'Documentos importantes'
+        : 'Archivos';
   el.docHeadCount.textContent = docs.length === 1 ? '1 archivo' : `${docs.length} archivos`;
-  el.docList.replaceChildren(...docs.map((doc) => docRow(doc, (searching || recent) && inCloud)));
+  el.docList.replaceChildren(...docs.map((doc) => docRow(doc, (searching || flat) && inCloud)));
 
-  el.newFolderTop.hidden = !inCloud || recent;
+  el.newFolderTop.hidden = !inCloud || flat;
   const empty = !docs.length && !folders.length;
   renderLibSide();
   el.emptyState.hidden = !empty;
   if (searching) {
     el.emptyTitle.textContent = 'Sin resultados';
     el.emptyText.textContent = 'No hay documentos ni carpetas con ese nombre.';
+  } else if (fav) {
+    el.emptyTitle.textContent = 'Aún no tienes favoritos';
+    el.emptyText.textContent =
+      'Toca la estrella ☆ de un documento (o «Agregar a favoritos» en su menú ⋯) para tenerlo siempre a mano aquí.';
   } else if (folderId) {
     el.emptyTitle.textContent = 'Carpeta vacía';
     el.emptyText.textContent = 'Escanea, agrega imágenes o arrastra PDF estando aquí para guardarlos en esta carpeta.';
   } else {
     el.emptyTitle.textContent = 'Aún no hay PDF';
     el.emptyText.textContent = 'Escanea un documento con la cámara o convierte imágenes de tu galería en un PDF de alta calidad.';
+  }
+}
+
+/** Tarjeta compacta de un favorito (acceso rápido al inicio de la biblioteca). */
+function favChip(doc) {
+  const li = document.createElement('li');
+  const url = thumbUrl(doc);
+  li.innerHTML = `
+    <button class="fav-chip">
+      ${url ? `<img class="fav-thumb" alt="" src="${url}">` : `<span class="fav-thumb">${icon('doc')}</span>`}
+      <span class="fav-meta"><span class="fav-name"></span><small></small></span>
+      <span class="fav-star">${icon('star')}</span>
+    </button>`;
+  li.querySelector('.fav-name').textContent = doc.name;
+  li.querySelector('small').textContent = `${pagesText(doc.pageCount)} · ${formatSize(doc.size)}`;
+  li.querySelector('.fav-chip').addEventListener('click', () => openViewer(doc));
+  return li;
+}
+
+/** Estrella del visor: llena si el documento abierto es favorito. */
+function renderViewerFav() {
+  const on = Boolean(state.current?.favorito);
+  el.favBtn.classList.toggle('on', on);
+  el.favBtn.setAttribute('aria-label', on ? 'Quitar de favoritos' : 'Agregar a favoritos');
+  el.favBtn.title = on ? 'Quitar de favoritos' : 'Agregar a favoritos';
+}
+
+/** Agrega o quita un documento de Favoritos (local al instante; luego en la nube). */
+async function toggleFavorite(doc) {
+  const favorito = !doc.favorito;
+  const actualizado = await updateDoc(doc.id, { favorito });
+  renderLibrary();
+  if (state.current?.id === doc.id) renderViewerFav();
+  toast(favorito ? '★ Agregado a favoritos' : 'Quitado de favoritos');
+  if (signedIn() && actualizado?.userId && actualizado.sync === 'subido') {
+    try {
+      await cloud.setFavorite(doc.id, favorito);
+    } catch (error) {
+      toast(`Favorito guardado solo en este dispositivo. ${error.message}`);
+    }
   }
 }
 
@@ -394,6 +457,21 @@ function renderLibSide() {
     }),
   );
 
+  nodes.push(
+    boton({
+      icon: 'star',
+      label: 'Favoritos',
+      count: docs.filter((d) => d.favorito).length,
+      active: state.view === 'fav',
+      run: () => {
+        state.view = 'fav';
+        el.search.value = '';
+        renderLibrary();
+        el.library.querySelector('.scroll').scrollTop = 0;
+      },
+    }),
+  );
+
   if (inCloud) {
     const mas = document.createElement('button');
     mas.className = 'side-heading-btn';
@@ -469,6 +547,7 @@ function docRow(doc, showFolder) {
         <span class="date"></span>
       </span>
       <span class="row-actions">
+        <button class="icon-btn star-btn${doc.favorito ? ' on' : ''}" aria-label="${doc.favorito ? 'Quitar de favoritos' : 'Agregar a favoritos'}" title="${doc.favorito ? 'Quitar de favoritos' : 'Agregar a favoritos'}" data-fav>${icon('star')}</button>
         <button class="row-btn view-btn" data-open>${icon('expand')}<span>Visualizar</span></button>
         <button class="icon-btn" aria-label="Compartir" data-share>${icon('share')}</button>
         <button class="icon-btn desk-only" aria-label="Descargar" data-download>${icon('download')}</button>
@@ -488,7 +567,9 @@ function docRow(doc, showFolder) {
   date.textContent = details.join(' · ');
   date.classList.toggle('error', doc.sync === 'error');
   li.querySelector('.doc-row').addEventListener('click', (event) => {
-    if (event.target.closest('[data-share]')) {
+    if (event.target.closest('[data-fav]')) {
+      toggleFavorite(doc);
+    } else if (event.target.closest('[data-share]')) {
       if (doc.pdf) sharePdf(doc);
       else openViewer(doc); // hay que descargarlo antes de poder compartirlo
     } else if (event.target.closest('[data-download]')) {
@@ -740,6 +821,7 @@ function syncFromCloud() {
           carpetaId: row.carpeta_id,
           origen: row.origen,
           estadoOcr: row.estado_ocr,
+          favorito: row.favorito ?? state.docs.find((d) => d.id === row.id)?.favorito ?? false,
           pageCount: row.paginas ?? 0,
           size: row.version?.tamano_bytes ?? 0,
           remotePath: row.version?.storage_path ?? null,
@@ -1305,7 +1387,10 @@ function finishDrag() {
 /** Menú «Más» del visor: anotar, organizar páginas, renombrar. */
 function toolsMenu() {
   const doc = state.current;
-  const opciones = [{ label: 'Anotar / firmar', run: () => openAnnotate(doc) }];
+  const opciones = [
+    { label: doc.favorito ? '★ Quitar de favoritos' : '☆ Agregar a favoritos', run: () => toggleFavorite(doc) },
+    { label: 'Anotar / firmar', run: () => openAnnotate(doc) },
+  ];
   if (signedIn() && doc.userId && ['pendiente', 'error'].includes(doc.sync)) {
     opciones.push({
       label: 'Subir a la nube ahora',
@@ -2155,6 +2240,7 @@ async function openViewer(doc) {
   state.current = doc;
   el.viewerTitle.textContent = doc.name;
   el.moveBtn.hidden = !(signedIn() && doc.userId);
+  renderViewerFav();
   closeViewerImages();
   if (doc.previews?.length) {
     viewerUrls = doc.previews.map((blob) => URL.createObjectURL(blob));
@@ -2883,6 +2969,7 @@ function setup() {
   el.uploadBannerBtn.addEventListener('click', uploadLocalDocs);
   el.profileBtn.addEventListener('click', () => $('accountBtn').click());
   el.newFolderTop.addEventListener('click', newFolder);
+  el.favBtn.addEventListener('click', () => state.current && toggleFavorite(state.current));
   el.dropZone.addEventListener('click', () => el.pdfInput.click());
 
   // Arrastrar y soltar (computador): PDF se importan; imágenes crean un PDF nuevo.
