@@ -1,4 +1,6 @@
-# Escáner PDF (app web)
+<img src="icons/agnescan-logo.png" alt="AgneScan" width="360">
+
+# AgneScan (app web)
 
 Escanea documentos con la cámara, convierte imágenes en PDF de alta calidad y envíalos a otras apps.
 Funciona en Safari, se instala en la pantalla de inicio y no necesita Mac ni App Store.
@@ -9,7 +11,7 @@ pantalla grande y ratón). Con sesión iniciada, tus PDF se guardan en tu biblio
 ## Instalar en el iPhone
 1. Abre la dirección de la app en **Safari**.
 2. Toca **Compartir** (cuadrado con flecha) › **Agregar a inicio** (o **Agregar a pantalla de inicio**, según la versión de iOS).
-3. Ábrela desde el icono **Escáner PDF**: se ve a pantalla completa, como una app.
+3. Ábrela desde el icono **AgneScan**: se ve a pantalla completa, como una app.
 
 ## Uso
 - **Escanear**: haz la foto → la app detecta los bordes de la hoja (puedes ajustar las 4 esquinas con lupa) → pestaña **Resultado** para el filtro (Original, Nítido, Grises, Blanco y negro) y el giro → **Listo** o **Listo y escanear otra**.

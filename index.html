@@ -8,12 +8,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="Escáner PDF">
-  <meta name="description" content="Escanea documentos y convierte imágenes en PDF de alta calidad, directamente en tu iPhone.">
-  <title>Escáner PDF</title>
+  <meta name="apple-mobile-web-app-title" content="AgneScan">
+  <meta name="description" content="AgneScan: escanea documentos, conviértelos en PDF de alta calidad y organízalos en la nube.">
+  <title>AgneScan</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
-  <link rel="icon" href="icons/icon-192.png">
+  <link rel="icon" href="icons/logo.svg" type="image/svg+xml">
+  <link rel="alternate icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
   <script defer src="js/vendor/supabase.js"></script>
   <script type="module" src="js/app.js"></script>
@@ -30,8 +31,8 @@
     <div class="lib-body">
       <aside class="lib-side">
         <div class="side-brand">
-          <span class="side-logo" data-icon="doc"></span>
-          <span class="side-brand-text"><strong>Mis PDF</strong><small>Espacio de documentos</small></span>
+          <img class="side-logo" src="icons/logo.svg" alt="">
+          <span class="side-brand-text"><strong class="wordmark"><span>AGNE</span><span>SCAN</span></strong><small>Escáner y documentos PDF</small></span>
           <span id="cloudBadge" class="cloud-badge" hidden>Nube</span>
         </div>
         <nav id="libSide" class="side-nav" aria-label="Menú"></nav>

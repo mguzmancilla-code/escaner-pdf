@@ -1,7 +1,7 @@
 {
-  "name": "Escáner PDF",
-  "short_name": "Escáner PDF",
-  "description": "Escanea documentos y convierte imágenes en PDF de alta calidad.",
+  "name": "AgneScan",
+  "short_name": "AgneScan",
+  "description": "AgneScan: escanea documentos, conviértelos en PDF de alta calidad y organízalos en la nube.",
   "lang": "es",
   "start_url": "./",
   "scope": "./",

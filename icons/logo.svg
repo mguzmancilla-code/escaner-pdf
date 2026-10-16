@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- AgneScan: documento PDF dentro del marco de escaneo, con la línea de luz -->
+  <defs>
+    <linearGradient id="marco" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d6fe8"/>
+      <stop offset="1" stop-color="#22c3e6"/>
+    </linearGradient>
+    <linearGradient id="hoja" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e6effb"/>
+    </linearGradient>
+    <linearGradient id="banda" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f80f2"/>
+      <stop offset="1" stop-color="#1546c9"/>
+    </linearGradient>
+    <linearGradient id="luz" x1="0" x2="1">
+      <stop offset="0" stop-color="#4fe3ff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#6eeeff"/>
+      <stop offset="1" stop-color="#4fe3ff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="brillo" x="-10%" y="-200%" width="120%" height="500%">
+      <feGaussianBlur stdDeviation="1.8"/>
+    </filter>
+  </defs>
+
+  <g fill="none" stroke="url(#marco)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 27V17a7 7 0 0 1 7-7h10"/>
+    <path d="M73 10h10a7 7 0 0 1 7 7v10"/>
+    <path d="M90 73v10a7 7 0 0 1-7 7H73"/>
+    <path d="M27 90H17a7 7 0 0 1-7-7V73"/>
+  </g>
+
+  <path d="M30 20h29l15 15v43a5 5 0 0 1-5 5H30a5 5 0 0 1-5-5V25a5 5 0 0 1 5-5z" fill="url(#hoja)" stroke="#c6d6ee" stroke-width="1"/>
+  <path d="M59 20v10a5 5 0 0 0 5 5h10z" fill="#3b86f4"/>
+  <g fill="#a7bde2">
+    <rect x="32" y="30" width="20" height="3.6" rx="1.8"/>
+    <rect x="32" y="38.5" width="32" height="3.6" rx="1.8"/>
+    <rect x="32" y="47" width="26" height="3.6" rx="1.8"/>
+  </g>
+  <path d="M25 58h49v20a5 5 0 0 1-5 5H30a5 5 0 0 1-5-5z" fill="url(#banda)"/>
+  <text x="49.5" y="76" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="13.5" fill="#ffffff" letter-spacing="0.5">PDF</text>
+
+  <rect x="2" y="53" width="96" height="6" fill="url(#luz)" filter="url(#brillo)"/>
+  <rect x="9" y="55.2" width="82" height="1.6" rx="0.8" fill="#e9fdff" opacity="0.95"/>
+</svg>

@@ -727,3 +727,16 @@ svg.icon { width: 22px; height: 22px; flex: none; }
   .fav-chip:hover { border-color: #f5a524; }
   .row-actions .star-btn:hover { color: #f5a524; }
 }
+
+/* ---------- Marca AgneScan ---------- */
+@media (min-width: 768px) {
+  img.side-logo { width: 42px; height: 42px; padding: 0; background: none; border-radius: 0; object-fit: contain; }
+}
+.wordmark { display: inline-flex; font-weight: 800; letter-spacing: 0.03em; font-size: 17px !important; }
+.wordmark span:first-child { color: #13398a; }
+.wordmark span:last-child {
+  background: linear-gradient(90deg, #1d8fe8, #22c3e6); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+@media (prefers-color-scheme: dark) {
+  .wordmark span:first-child { color: #dbe7ff; }
+}

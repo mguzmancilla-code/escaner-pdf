@@ -37,7 +37,7 @@ export function buildPdf(pages, { pageSize = 'a4', margins = false, title = '' }
   const kids = pages.map((_, i) => `${4 + 3 * i} 0 R`).join(' ');
   object(1, '<< /Type /Catalog /Pages 2 0 R >>');
   object(2, `<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`);
-  object(3, `<< /Title ${textString(title)} /Creator ${textString('Escáner PDF')} /Producer ${textString('Escáner PDF')} /CreationDate (${pdfDate(new Date())}) >>`);
+  object(3, `<< /Title ${textString(title)} /Creator ${textString('AgneScan')} /Producer ${textString('AgneScan')} /CreationDate (${pdfDate(new Date())}) >>`);
 
   pages.forEach((page, i) => {
     const pageNum = 4 + 3 * i;

@@ -87,7 +87,7 @@ export async function pageCount(blob) {
 export async function normalize(blob) {
   const PDFLib = await pdflib();
   const doc = await loadDoc(PDFLib, blob);
-  doc.setProducer('Escaner PDF');
+  doc.setProducer('AgneScan');
   return asBlob(await doc.save({ useObjectStreams: false }));
 }
 
