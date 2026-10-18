@@ -89,7 +89,7 @@ for (const id of [
   'organize', 'orgCancel', 'orgTitle', 'orgSave', 'orgHint', 'orgGrid', 'orgActions',
   'annotate', 'annCancel', 'annSave', 'annTools', 'annHint', 'annPages',
   'busy', 'busyText', 'busySpinner', 'busyBar', 'busyBarFill', 'busySub', 'toast',
-  'cameraInput', 'imagesInput', 'pdfInput',
+  'cameraInput', 'imagesInput', 'pdfInput', 'folderInput', 'mixedInput',
 ]) el[id] = $(id);
 
 const state = {
@@ -424,6 +424,7 @@ function renderLibSide() {
 
   nodes.push(titulo('Herramientas PDF'));
   nodes.push(boton({ icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() }));
+  nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
   nodes.push(
     boton({
@@ -761,6 +762,7 @@ function addMenu() {
   const options = [];
   if (signedIn()) options.push({ label: 'Nueva carpeta', run: newFolder });
   options.push({ label: 'Importar PDF', run: () => el.pdfInput.click() });
+  options.push({ label: 'Importar todo: PDF e imágenes (CamScanner)', run: importMenu });
   options.push({ label: 'Combinar PDF', run: openCombine });
   chooseAction(signedIn() ? `Agregar en «${folderLabel(state.folderId)}»` : 'Agregar', options);
 }
@@ -2400,6 +2402,34 @@ async function deleteCurrent() {
   }
 }
 
+/**
+ * Lee un PDF elegido por el usuario: páginas, miniatura y texto (si ya trae).
+ * Devuelve null si el archivo no es un PDF.
+ */
+async function readPdfFile(file, pdftext, onPage) {
+  const buffer = await file.arrayBuffer();
+  if (new TextDecoder('latin1').decode(buffer.slice(0, 4)) !== '%PDF') return null;
+  const blob = new Blob([buffer], { type: 'application/pdf' });
+
+  let pageCount = 0;
+  let textoOcr = null;
+  let thumb = null;
+  if (pdftext) {
+    const info = await pdftext.prepareImport(blob, onPage);
+    pageCount = info.pageCount;
+    thumb = info.thumb;
+    // Si el PDF ya trae texto real, queda listo para buscar; si no, pendiente de OCR.
+    const util = info.text.replace(/\s/g, '').length;
+    if (util >= Math.max(16, info.pageCount * 8)) textoOcr = info.text;
+  } else {
+    // Respaldo sin pdf.js: contar páginas de forma aproximada.
+    const marks = new TextDecoder('latin1').decode(buffer).match(/\/Type\s*\/Page(?![a-zA-Z])/g);
+    pageCount = marks ? marks.length : 1;
+  }
+  const esCamScanner = /CamScanner/i.test(new TextDecoder('latin1').decode(buffer.slice(0, 2048)));
+  return { blob, pageCount, thumb, textoOcr, esCamScanner };
+}
+
 async function importPdfs(files) {
   // Elegir carpeta de destino (si hay sesión y existen carpetas).
   let destino = signedIn() ? state.folderId : null;
@@ -2427,33 +2457,14 @@ async function importPdfs(files) {
     const head = total === 1 ? 'Importando PDF…' : `Importando ${index + 1} de ${total}…`;
     busy(head, { fraction: index / total, sub: file.name });
     try {
-      const buffer = await file.arrayBuffer();
-      const raw = new TextDecoder('latin1').decode(buffer.slice(0, 4));
-      if (raw !== '%PDF') {
+      const leido = await readPdfFile(file, pdftext, (n, tot) =>
+        busy(head, { fraction: (index + n / tot) / total, sub: `${file.name} · página ${n} de ${tot}` }),
+      );
+      if (!leido) {
         errores.push(`«${file.name}» no es un PDF válido.`);
         continue;
       }
-      const blob = new Blob([buffer], { type: 'application/pdf' });
-
-      let pageCount = 0;
-      let textoOcr = null;
-      let thumb = null;
-      if (pdftext) {
-        const info = await pdftext.prepareImport(blob, (n, tot) =>
-          busy(head, { fraction: (index + n / tot) / total, sub: `${file.name} · página ${n} de ${tot}` }),
-        );
-        pageCount = info.pageCount;
-        thumb = info.thumb;
-        // Si el PDF ya trae texto real, queda listo para buscar; si no, pendiente de OCR.
-        const util = info.text.replace(/\s/g, '').length;
-        if (util >= Math.max(16, info.pageCount * 8)) textoOcr = info.text;
-      } else {
-        // Respaldo sin pdf.js: contar páginas de forma aproximada.
-        const marks = new TextDecoder('latin1').decode(buffer).match(/\/Type\s*\/Page(?![a-zA-Z])/g);
-        pageCount = marks ? marks.length : 1;
-      }
-
-      const esCamScanner = /CamScanner/i.test(new TextDecoder('latin1').decode(buffer.slice(0, 2048)));
+      const { blob, pageCount, thumb, textoOcr, esCamScanner } = leido;
       if (!textoOcr) needOcr++;
       const doc = {
         id: uid(),
@@ -2487,6 +2498,261 @@ async function importPdfs(files) {
   }
   if (errores.length) toast(errores[0]);
   processQueue();
+}
+
+// ---------------------------------------------------------------------------
+// Importación masiva (p. ej. lo exportado desde CamScanner): carpetas con PDF
+// e imágenes de una sola vez, guardadas en «Documentos importados».
+// ---------------------------------------------------------------------------
+
+const IMPORT_FOLDER = 'Documentos importados';
+const IMAGE_EXT = /\.(jpe?g|png|webp|gif|bmp|heic|heif|tiff?)$/i;
+const isPdfFile = (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+const isImageFile = (f) => f.type.startsWith('image/') || IMAGE_EXT.test(f.name);
+const byName = (a, b) => a.localeCompare(b, 'es', { numeric: true, sensitivity: 'base' });
+
+/** Archivos de un <input>: cada uno con sus carpetas relativas (si se eligió una carpeta). */
+function itemsFromInput(files) {
+  return [...files].map((file) => ({ file, dirs: (file.webkitRelativePath || '').split('/').slice(0, -1) }));
+}
+
+/** Recorre lo soltado (archivos y carpetas completas, con subcarpetas). */
+async function itemsFromEntries(entries) {
+  const out = [];
+  const walk = async (entry, dirs) => {
+    if (entry.isFile) {
+      out.push({ file: await new Promise((ok, fail) => entry.file(ok, fail)), dirs });
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      // readEntries entrega por tandas (≈100): se repite hasta que vuelve vacío.
+      for (;;) {
+        const batch = await new Promise((ok, fail) => reader.readEntries(ok, fail));
+        if (!batch.length) break;
+        for (const child of batch) await walk(child, [...dirs, entry.name]);
+      }
+    }
+  };
+  for (const entry of entries) await walk(entry, []);
+  return out;
+}
+
+/**
+ * Separa el número de página del nombre: «Recibo_2.jpg» → { base: 'Recibo', n: 2 }.
+ * Acepta «_2», «-2», « 2», « (2)», «_p2», «_page2», «_pag 2».
+ */
+function splitPageNumber(fileName) {
+  const stem = fileName.replace(/\.[^.]+$/, '').trim();
+  const m = stem.match(/^(.*?\S)(?:[\s_-]+(?:p(?:age|ag|ág|agina|ágina)?\.?\s*)?(\d{1,3})|\s*\((\d{1,3})\))$/i);
+  if (!m) return { base: stem, n: null };
+  return { base: m[1].replace(/[\s_-]+$/, ''), n: Number(m[2] ?? m[3]) };
+}
+
+/**
+ * Agrupa las imágenes que son páginas de un mismo documento (misma carpeta y
+ * mismo nombre base con números 1, 2, 3…). Si la numeración no es correlativa
+ * (p. ej. «Boleta 05» y «Boleta 12»), cada imagen queda como documento propio.
+ */
+function groupImages(items) {
+  const grupos = new Map();
+  for (const item of items) {
+    const { base, n } = splitPageNumber(item.file.name);
+    const key = `${item.dirs.join('/')}\u0000${base.toLowerCase()}`;
+    if (!grupos.has(key)) grupos.set(key, { base, dirs: item.dirs, pages: [] });
+    grupos.get(key).pages.push({ ...item, n });
+  }
+  const out = [];
+  for (const g of grupos.values()) {
+    const numeradas = g.pages.filter((p) => p.n != null).sort((a, b) => a.n - b.n);
+    const sinNumero = g.pages.filter((p) => p.n == null);
+    const correlativas =
+      numeradas.length > 0 &&
+      numeradas[0].n <= 1 &&
+      numeradas.every((p, i) => p.n === numeradas[0].n + i) &&
+      sinNumero.length <= 1;
+    if (g.pages.length > 1 && correlativas) {
+      out.push({ kind: 'images', name: g.base, dirs: g.dirs, files: [...sinNumero, ...numeradas].map((p) => p.file) });
+    } else {
+      for (const p of g.pages) {
+        out.push({ kind: 'images', name: sanitizeName(p.file.name.replace(/\.[^.]+$/, '')), dirs: p.dirs, files: [p.file] });
+      }
+    }
+  }
+  return out;
+}
+
+/** Busca la carpeta por nombre dentro de padreId; si no existe, la crea en la nube. */
+async function ensureFolder(nombre, padreId) {
+  const existe = state.folders.find(
+    (f) => f.nombre.toLowerCase() === nombre.toLowerCase() && (f.carpeta_padre_id ?? null) === padreId,
+  );
+  if (existe) return existe.id;
+  const nueva = await cloud.createFolder(nombre, padreId);
+  state.folders.push(nueva);
+  return nueva.id;
+}
+
+/** Une imágenes ya recortadas (como las de CamScanner) en un PDF, sin volver a procesarlas. */
+async function pdfFromImages(files, name) {
+  const { maxSide, jpeg } = QUALITIES.high;
+  const pages = [];
+  let thumb = null;
+  for (const [i, file] of files.entries()) {
+    const out = await resizeJpeg(file, maxSide, jpeg);
+    pages.push({ jpeg: out.blob, width: out.width, height: out.height });
+    if (i === 0) thumb = (await resizeJpeg(out.blob, 360, 0.8)).blob;
+  }
+  return { pdf: buildPdf(pages, { pageSize: 'fit', title: name }), pageCount: pages.length, thumb };
+}
+
+const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+
+/**
+ * Importa de una vez PDF e imágenes (con sus subcarpetas). Cada PDF queda como
+ * documento; las imágenes se unen por documento y se convierten a PDF.
+ * @param {{file: File, dirs: string[]}[]} items
+ */
+async function importBatch(items) {
+  items = items.filter(({ file }) => !file.name.startsWith('.') && (isPdfFile(file) || isImageFile(file)));
+  if (!items.length) {
+    toast('No se encontraron PDF ni imágenes para importar.');
+    return;
+  }
+  // La carpeta elegida (raíz común) no se repite; sus subcarpetas sí se conservan.
+  while (items.every((it) => it.dirs.length && it.dirs[0] === items[0].dirs[0])) {
+    items = items.map((it) => ({ ...it, dirs: it.dirs.slice(1) }));
+  }
+  items.forEach((it) => (it.dirs = it.dirs.map((d) => sanitizeName(d)).filter(Boolean)));
+
+  const pdfItems = items.filter((it) => isPdfFile(it.file));
+  const imageItems = items.filter((it) => !isPdfFile(it.file));
+  const tasks = [
+    ...pdfItems.map((it) => ({ kind: 'pdf', name: sanitizeName(it.file.name), dirs: it.dirs, files: [it.file] })),
+    ...groupImages(imageItems),
+  ].sort((a, b) => byName(a.dirs.join('/'), b.dirs.join('/')) || byName(a.name, b.name));
+  const desdeImagenes = tasks.length - pdfItems.length;
+  const conSubcarpetas = tasks.some((t) => t.dirs.length);
+
+  const enNube = signedIn();
+  if (enNube && !navigator.onLine) {
+    toast('Necesitas conexión a internet para crear las carpetas de la importación.');
+    return;
+  }
+  const lineas = [`Se importarán ${plural(tasks.length, 'documento', 'documentos')}:`];
+  if (pdfItems.length) lineas.push(`• ${plural(pdfItems.length, 'PDF', 'PDF')}`);
+  if (imageItems.length) {
+    lineas.push(
+      `• ${plural(desdeImagenes, 'PDF nuevo', 'PDF nuevos')} con ${plural(imageItems.length, 'imagen', 'imágenes')} ` +
+        '(las páginas numeradas de un mismo documento se unen)',
+    );
+  }
+  lineas.push(
+    '',
+    enNube
+      ? `Quedarán en la carpeta «${IMPORT_FOLDER}»${conSubcarpetas ? ', con sus mismas subcarpetas,' : ''} y se subirán a la nube.`
+      : `Quedarán solo en este equipo. Inicia sesión antes si quieres tenerlos en la carpeta «${IMPORT_FOLDER}» de la nube.`,
+    '',
+    '¿Continuar?',
+  );
+  if (!confirm(lineas.join('\n'))) return;
+
+  let pdftext = null;
+  try {
+    pdftext = await import('./pdftext.js');
+  } catch {
+    // Sin pdf.js se importa igual, sin extraer texto.
+  }
+
+  const carpetas = new Map(); // ruta relativa → id de carpeta
+  let raiz = null;
+  const total = tasks.length;
+  let imported = 0;
+  let repetidos = 0;
+  const errores = [];
+
+  try {
+    if (enNube) {
+      busy('Preparando carpetas…');
+      raiz = await ensureFolder(IMPORT_FOLDER, null);
+    }
+    for (const [index, task] of tasks.entries()) {
+      const head = `Importando ${index + 1} de ${total}…`;
+      const ruta = [...task.dirs, task.name].join(' / ');
+      busy(head, { fraction: index / total, sub: ruta });
+      try {
+        let carpetaId = null;
+        if (enNube) {
+          carpetaId = raiz;
+          for (const [i, dir] of task.dirs.entries()) {
+            const key = task.dirs.slice(0, i + 1).join('/');
+            if (!carpetas.has(key)) carpetas.set(key, await ensureFolder(dir, carpetaId));
+            carpetaId = carpetas.get(key);
+          }
+        }
+        const name = task.name || 'Documento';
+        // Volver a importar la misma carpeta no duplica lo que ya está.
+        if (visibleDocs().some((d) => d.name === name && (d.carpetaId ?? null) === carpetaId)) {
+          repetidos++;
+          continue;
+        }
+
+        let fields;
+        if (task.kind === 'pdf') {
+          const leido = await readPdfFile(task.files[0], pdftext, (n, tot) =>
+            busy(head, { fraction: (index + n / tot) / total, sub: `${ruta} · página ${n} de ${tot}` }),
+          );
+          if (!leido) throw new Error('no es un PDF válido');
+          fields = {
+            size: leido.blob.size,
+            pageCount: leido.pageCount,
+            pdf: leido.blob,
+            thumb: leido.thumb,
+            origen: leido.esCamScanner ? 'camscanner' : 'importado',
+            textoOcr: leido.textoOcr,
+            estadoOcr: leido.textoOcr ? 'completado' : 'pendiente',
+          };
+        } else {
+          const { pdf, pageCount, thumb } = await pdfFromImages(task.files, name);
+          fields = { size: pdf.size, pageCount, pdf, thumb, origen: 'importado', textoOcr: null, estadoOcr: 'pendiente' };
+        }
+        const doc = { id: uid(), name, created: Date.now(), previews: null, ...fields, ...newDocOwnership(), carpetaId };
+        await saveDoc(doc);
+        state.docs.push(doc);
+        imported++;
+      } catch (error) {
+        errores.push(`«${ruta}»: ${error.message}`);
+      }
+    }
+  } catch (error) {
+    errores.unshift(error.message); // p. ej. no se pudo crear la carpeta principal
+  } finally {
+    busy(null);
+  }
+
+  navigator.storage?.persist?.();
+  if (raiz) openFolder(raiz);
+  else renderLibrary();
+  const partes = [`${plural(imported, 'documento importado', 'documentos importados')}`];
+  if (repetidos) partes.push(`${repetidos} ya ${repetidos === 1 ? 'estaba' : 'estaban'}`);
+  if (errores.length) partes.push(`${errores.length} con error`);
+  toast(partes.join(' · '));
+  if (errores.length) {
+    console.warn('Errores de importación:', errores);
+    const lista = errores.slice(0, 15).join('\n') + (errores.length > 15 ? '\n…' : '');
+    const titulo = errores.length === 1 ? 'No se pudo importar 1 elemento' : `No se pudieron importar ${errores.length} elementos`;
+    setTimeout(() => alert(`${titulo}:\n\n${lista}`), 300);
+  }
+  processQueue();
+}
+
+/** Menú para elegir qué importar de una vez. */
+function importMenu() {
+  const options = [
+    { label: 'Elegir una carpeta completa (PDF e imágenes)', run: () => el.folderInput.click() },
+    { label: 'Elegir archivos (PDF e imágenes)', run: () => el.mixedInput.click() },
+  ];
+  // En iPhone no se puede elegir una carpeta entera, solo archivos.
+  if (isIOS()) options.shift();
+  chooseAction(`Importar todo en «${IMPORT_FOLDER}»`, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -3039,7 +3305,8 @@ function setup() {
   el.favBtn.addEventListener('click', () => state.current && toggleFavorite(state.current));
   el.dropZone.addEventListener('click', () => el.pdfInput.click());
 
-  // Arrastrar y soltar (computador): PDF se importan; imágenes crean un PDF nuevo.
+  // Arrastrar y soltar (computador): PDF se importan; imágenes crean un PDF nuevo;
+  // carpetas completas (o PDF junto con imágenes) van a «Documentos importados».
   let dragDepth = 0;
   const conArchivos = (event) => [...(event.dataTransfer?.types ?? [])].includes('Files');
   el.library.addEventListener('dragenter', (event) => {
@@ -3060,10 +3327,16 @@ function setup() {
     event.preventDefault();
     dragDepth = 0;
     el.library.classList.remove('dragging');
+    // Las entradas se leen ya: terminado el evento dejan de estar disponibles.
+    const entries = [...event.dataTransfer.items].map((item) => item.webkitGetAsEntry?.()).filter(Boolean);
     const files = [...event.dataTransfer.files];
-    const pdfs = files.filter((f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
-    const imagenes = files.filter((f) => f.type.startsWith('image/'));
-    if (pdfs.length) importPdfs(pdfs);
+    const pdfs = files.filter(isPdfFile);
+    const imagenes = files.filter(isImageFile);
+    if (entries.some((entry) => entry.isDirectory) || (pdfs.length && imagenes.length)) {
+      (entries.length ? itemsFromEntries(entries) : Promise.resolve(itemsFromInput(files)))
+        .then(importBatch)
+        .catch((error) => toast(`No se pudo leer lo soltado: ${error.message}`));
+    } else if (pdfs.length) importPdfs(pdfs);
     else if (imagenes.length) {
       newDraft();
       addFromLibrary(imagenes);
@@ -3106,6 +3379,14 @@ function setup() {
       importPdfs(files);
     }
   });
+
+  for (const input of [el.folderInput, el.mixedInput]) {
+    input.addEventListener('change', () => {
+      const items = itemsFromInput(input.files);
+      input.value = '';
+      if (items.length) importBatch(items);
+    });
+  }
 
   // Combinar PDF
   el.combCancel.addEventListener('click', closeCombine);

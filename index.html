@@ -74,7 +74,7 @@
         <div id="dropZone" class="drop-zone">
           <span data-icon="upload"></span>
           <strong>Arrastra y suelta tus PDF aquí</strong>
-          <small>o haz clic para elegirlos</small>
+          <small>También carpetas completas con PDF e imágenes (p. ej. lo exportado de CamScanner) · o haz clic para elegir</small>
         </div>
         <div id="emptyState" class="empty" hidden>
           <div class="empty-icon" data-icon="scan"></div>
@@ -286,5 +286,7 @@
   <input id="cameraInput" class="file-input" type="file" accept="image/*" capture="environment">
   <input id="imagesInput" class="file-input" type="file" accept="image/*" multiple>
   <input id="pdfInput" class="file-input" type="file" accept="application/pdf,.pdf" multiple>
+  <input id="folderInput" class="file-input" type="file" webkitdirectory multiple>
+  <input id="mixedInput" class="file-input" type="file" accept="application/pdf,.pdf,image/*" multiple>
 </body>
 </html>
