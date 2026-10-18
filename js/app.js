@@ -88,7 +88,7 @@ for (const id of [
   'combine', 'combCancel', 'combDo', 'combOrder', 'combList', 'combImport',
   'organize', 'orgCancel', 'orgTitle', 'orgSave', 'orgHint', 'orgGrid', 'orgActions',
   'annotate', 'annCancel', 'annSave', 'annTools', 'annHint', 'annPages',
-  'busy', 'busyText', 'busySpinner', 'busyBar', 'busyBarFill', 'busySub', 'toast',
+  'busy', 'busyText', 'busySpinner', 'busyBar', 'busyBarFill', 'busySub', 'busyStop', 'toast',
   'cameraInput', 'imagesInput', 'pdfInput', 'folderInput', 'mixedInput',
 ]) el[id] = $(id);
 
@@ -426,6 +426,12 @@ function renderLibSide() {
   nodes.push(boton({ icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() }));
   nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
+  if (inCloud) {
+    const pendientes = pendingOcrDocs();
+    if (pendientes.length) {
+      nodes.push(boton({ icon: 'search', label: 'OCR de pendientes', count: pendientes.length, run: () => ocrBatch(pendingOcrDocs()) }));
+    }
+  }
   nodes.push(
     boton({
       icon: 'photo',
@@ -680,7 +686,11 @@ function newFolder() {
 }
 
 function folderMenu(folder) {
+  const pendientes = pendingOcrDocs(folder.id);
   chooseAction(folder.nombre, [
+    ...(pendientes.length
+      ? [{ label: `Reconocer texto de pendientes (${pendientes.length})`, run: () => ocrBatch(pendingOcrDocs(folder.id), folder.nombre) }]
+      : []),
     {
       label: 'Renombrar',
       run: () => {
@@ -764,6 +774,10 @@ function addMenu() {
   options.push({ label: 'Importar PDF', run: () => el.pdfInput.click() });
   options.push({ label: 'Importar todo: PDF e imágenes (CamScanner)', run: importMenu });
   options.push({ label: 'Combinar PDF', run: openCombine });
+  const pendientes = signedIn() ? pendingOcrDocs() : [];
+  if (pendientes.length) {
+    options.push({ label: `Reconocer texto de todos los pendientes (${pendientes.length})`, run: () => ocrBatch(pendingOcrDocs()) });
+  }
   chooseAction(signedIn() ? `Agregar en «${folderLabel(state.folderId)}»` : 'Agregar', options);
 }
 
@@ -1442,6 +1456,110 @@ async function runOcrOn(doc) {
   } catch (error) {
     busy(null);
     toast(`No se pudo reconocer el texto: ${error.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OCR de todos los pendientes (de una carpeta o de toda la biblioteca)
+// ---------------------------------------------------------------------------
+
+const OCR_MAX_BYTES = 20 * 1024 * 1024; // más grande no cabe en una llamada a la función de OCR
+
+/** Documentos con OCR pendiente; con carpetaId, solo esa carpeta y sus subcarpetas. */
+function pendingOcrDocs(carpetaId) {
+  const docs = visibleDocs().filter((doc) => doc.estadoOcr === 'pendiente');
+  if (carpetaId === undefined) return docs;
+  const ids = new Set([carpetaId]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const f of state.folders) {
+      if (ids.has(f.carpeta_padre_id) && !ids.has(f.id)) {
+        ids.add(f.id);
+        grew = true;
+      }
+    }
+  }
+  return docs.filter((doc) => ids.has(doc.carpetaId ?? null));
+}
+
+/** Nombres que no dicen nada del contenido («CamScanner 01-02-2024…», «Escaneo…», «IMG_1234»). */
+const GENERIC_NAME = /^(camscanner|escaneo|scan|documento|doc|img|image|imagen|foto|photo|nuevo documento|new document)(?=[\s._-]|\d|$)|^[\d\s._-]+$/i;
+
+let ocrStop = false;
+
+async function ocrBatch(docs, donde) {
+  if (!signedIn()) return toast('Inicia sesión para usar el OCR.');
+  if (!navigator.onLine) return toast('Necesitas conexión a internet para el OCR.');
+  if (!docs.length) return toast('No hay documentos con OCR pendiente.');
+
+  const renombrar = await new Promise((resolve) => {
+    chooseAction(
+      `Reconocer texto de ${plural(docs.length, 'documento', 'documentos')}${donde ? ` en «${donde}»` : ''}`,
+      [
+        { label: 'Reconocer texto y renombrar los de nombre genérico', run: () => resolve(true) },
+        { label: 'Solo reconocer texto (no cambiar nombres)', run: () => resolve(false) },
+      ],
+      () => resolve(null),
+    );
+  });
+  if (renombrar == null) return;
+
+  ocrStop = false;
+  el.busyStop.hidden = false;
+  let lock = null;
+  try {
+    lock = await navigator.wakeLock?.request('screen'); // que la pantalla no se apague a medio proceso
+  } catch {
+    /* opcional */
+  }
+
+  let listos = 0;
+  let renombrados = 0;
+  let seguidos = 0; // errores consecutivos: si son varios, el servicio no está respondiendo
+  const errores = [];
+  try {
+    for (const [i, original] of docs.entries()) {
+      if (ocrStop) break;
+      const doc = state.docs.find((d) => d.id === original.id);
+      if (!doc || doc.estadoOcr !== 'pendiente') continue;
+      busy(`Reconociendo texto… ${i + 1} de ${docs.length}`, { fraction: i / docs.length, sub: doc.name });
+      try {
+        const blob = await pdfBlobOf(doc);
+        if (blob.size > OCR_MAX_BYTES) throw new Error('es muy grande para el OCR (máx. 20 MB)');
+        const res = await cloud.runOcr(blob);
+        await updateDoc(doc.id, { textoOcr: res.texto, estadoOcr: 'completado' });
+        if (inCloud(doc)) await cloud.setOcr(doc.id, res.texto, 'completado');
+        const sugerido = sanitizeName(res.nombre_sugerido || '').slice(0, 120);
+        if (renombrar && sugerido && GENERIC_NAME.test(doc.name) && sugerido !== doc.name) {
+          if (inCloud(doc)) await cloud.renameDocument(doc.id, sugerido);
+          await updateDoc(doc.id, { name: sugerido });
+          renombrados++;
+        }
+        listos++;
+        seguidos = 0;
+      } catch (error) {
+        errores.push(`«${doc.name}»: ${error.message}`);
+        if (++seguidos >= 3) {
+          errores.push('Se detuvo tras 3 errores seguidos. Revisa tu conexión o el servicio de OCR e inténtalo de nuevo.');
+          break;
+        }
+      }
+      if (i % 5 === 4) renderLibrary();
+    }
+  } finally {
+    el.busyStop.hidden = true;
+    busy(null);
+    lock?.release?.().catch(() => {});
+    renderLibrary();
+  }
+
+  const partes = [`Texto reconocido en ${plural(listos, 'documento', 'documentos')}`];
+  if (renombrados) partes.push(`${renombrados} ${renombrados === 1 ? 'renombrado' : 'renombrados'}`);
+  if (ocrStop) partes.push('detenido');
+  toast(partes.join(' · '));
+  if (errores.length) {
+    const lista = errores.slice(0, 15).join('\n') + (errores.length > 15 ? '\n…' : '');
+    setTimeout(() => alert(`Quedaron pendientes:\n\n${lista}`), 300);
   }
 }
 
@@ -3389,6 +3507,11 @@ function setup() {
   }
 
   // Combinar PDF
+  el.busyStop.addEventListener('click', () => {
+    ocrStop = true;
+    el.busyStop.hidden = true;
+    el.busySub.textContent = 'Deteniendo al terminar el documento actual…';
+  });
   el.combCancel.addEventListener('click', closeCombine);
   el.combDo.addEventListener('click', runCombine);
   el.combImport.addEventListener('click', () => el.pdfInput.click());

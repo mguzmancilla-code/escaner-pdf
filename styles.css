@@ -338,6 +338,8 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .progress-bar span { display: block; height: 100%; width: 0; border-radius: 4px; background: var(--accent); transition: width 0.2s ease; }
 .busy-sub { margin: 8px 0 0; font-size: 13px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
 .busy-sub:empty { display: none; }
+.busy-stop { margin-top: 14px; padding: 8px 18px; border: 1px solid var(--border, rgba(128,128,128,.35)); border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
+.busy-stop:hover { background: rgba(128, 128, 128, 0.12); }
 .action-item.selected { font-weight: 600; }
 .action-item.selected::after { content: " ✓"; color: var(--accent); }
 
