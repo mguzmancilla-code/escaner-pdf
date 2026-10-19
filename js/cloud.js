@@ -247,15 +247,28 @@ export async function runOcr(pdfBlob) {
   }
   if (!res.ok) {
     let msg = `Error ${res.status}`;
+    let status = res.status;
     if (res.status === 404) msg = 'La función de OCR no está publicada todavía.';
     else {
       try {
-        msg = (await res.json()).error || msg;
+        const body = await res.json();
+        msg = body.error || msg;
+        // La función reenvía la respuesta del servicio de OCR: se agrega su motivo.
+        const upstream = msg.match(/respondió (\d{3})/);
+        if (upstream) status = Number(upstream[1]);
+        if (body.detalle) {
+          try {
+            const motivo = JSON.parse(body.detalle)?.error?.message;
+            if (motivo) msg += ` (${motivo})`;
+          } catch {
+            msg += ` (${String(body.detalle).slice(0, 160)})`;
+          }
+        }
       } catch {
         /* sin cuerpo JSON */
       }
     }
-    throw new Error(msg);
+    throw Object.assign(new Error(msg), { status });
   }
   return res.json();
 }

@@ -31,6 +31,11 @@ async function openPdf(data) {
  * app esté en segundo plano. Si no, usa un canvas normal.
  */
 async function pageToBlob(page, maxSide, quality, type = 'image/jpeg') {
+  return (await pageToImage(page, maxSide, quality, type)).blob;
+}
+
+/** Como pageToBlob, pero devuelve también el tamaño en píxeles de la imagen. */
+async function pageToImage(page, maxSide, quality, type = 'image/jpeg') {
   const base = page.getViewport({ scale: 1 });
   const scale = Math.min(maxSide / Math.max(base.width, base.height), 4);
   const viewport = page.getViewport({ scale });
@@ -56,7 +61,7 @@ async function pageToBlob(page, maxSide, quality, type = 'image/jpeg') {
     canvas.width = 0; // libera memoria en iOS
     canvas.height = 0;
   }
-  return blob;
+  return { blob, width: w, height: h };
 }
 
 /**
@@ -188,6 +193,35 @@ export async function renderPdfPagesDetailed(data, maxSide = 1400, onPage) {
       });
       page.cleanup();
       onPage?.(n, doc.numPages);
+    }
+  } finally {
+    await doc.destroy();
+  }
+  return salida;
+}
+
+/** Número de páginas de un PDF. */
+export async function countPages(data) {
+  const doc = await openPdf(data);
+  const n = doc.numPages;
+  await doc.destroy();
+  return n;
+}
+
+/**
+ * Renderiza las páginas «desde»‒«hasta» (1 = primera) a JPEG, con su tamaño en
+ * píxeles, listas para armar un PDF de imágenes (p. ej. para el OCR por tramos).
+ * @returns {{jpeg: Blob, width: number, height: number}[]}
+ */
+export async function renderPageRange(data, desde, hasta, maxSide = 2000, quality = 0.85) {
+  const doc = await openPdf(data);
+  const salida = [];
+  try {
+    for (let n = desde; n <= Math.min(hasta, doc.numPages); n++) {
+      const page = await doc.getPage(n);
+      const { blob, width, height } = await pageToImage(page, maxSide, quality);
+      salida.push({ jpeg: blob, width, height });
+      page.cleanup();
     }
   } finally {
     await doc.destroy();

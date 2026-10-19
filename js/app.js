@@ -1436,11 +1436,52 @@ function toolsMenu() {
   chooseAction(doc.name, opciones);
 }
 
+const OCR_TRAMO = 6; // páginas por consulta: con más, la respuesta puede quedar cortada
+const OCR_DIRECTO_MAX = 8 * 1024 * 1024;
+
+/**
+ * Reconoce el texto de un PDF. Si es corto se envía tal cual; si es largo,
+ * pesado o el servicio lo rechaza (p. ej. PDF protegido o con formato raro),
+ * se envía por tramos de páginas convertidas a imagen y se une el texto.
+ * @param {(hecho: number, total: number) => void} [onProgress] páginas listas
+ */
+async function ocrDocument(blob, onProgress) {
+  const pdftext = await import('./pdftext.js');
+  let total;
+  try {
+    total = await pdftext.countPages(blob);
+  } catch (error) {
+    if (error?.name === 'PasswordException') throw new Error('está protegido con contraseña');
+    throw new Error('el PDF está dañado o no se puede leer');
+  }
+  if (blob.size <= OCR_DIRECTO_MAX && total <= OCR_TRAMO) {
+    try {
+      return await cloud.runOcr(blob);
+    } catch (error) {
+      if (![400, 413].includes(error.status)) throw error; // rechazado: se reintenta como imágenes
+    }
+  }
+  const textos = [];
+  let nombre = '';
+  for (let desde = 1; desde <= total; desde += OCR_TRAMO) {
+    const hasta = Math.min(total, desde + OCR_TRAMO - 1);
+    onProgress?.(desde - 1, total);
+    const paginas = await pdftext.renderPageRange(blob, desde, hasta);
+    const res = await cloud.runOcr(buildPdf(paginas, { pageSize: 'fit', title: 'ocr' }));
+    textos.push((res.texto || '').trim());
+    nombre ||= res.nombre_sugerido || '';
+  }
+  onProgress?.(total, total);
+  return { texto: textos.filter(Boolean).join('\n\n'), nombre_sugerido: nombre };
+}
+
 async function runOcrOn(doc) {
   busy('Reconociendo texto…');
   try {
     const blob = await pdfBlobOf(doc);
-    const res = await cloud.runOcr(blob);
+    const res = await ocrDocument(blob, (hecho, total) =>
+      busy('Reconociendo texto…', { fraction: hecho / total, sub: `${hecho} de ${total} páginas` }),
+    );
     await updateDoc(doc.id, { textoOcr: res.texto, estadoOcr: 'completado' });
     if (inCloud(doc)) await cloud.setOcr(doc.id, res.texto, 'completado');
     renderLibrary();
@@ -1462,8 +1503,6 @@ async function runOcrOn(doc) {
 // ---------------------------------------------------------------------------
 // OCR de todos los pendientes (de una carpeta o de toda la biblioteca)
 // ---------------------------------------------------------------------------
-
-const OCR_MAX_BYTES = 20 * 1024 * 1024; // más grande no cabe en una llamada a la función de OCR
 
 /** Documentos con OCR pendiente; con carpetaId, solo esa carpeta y sus subcarpetas. */
 function pendingOcrDocs(carpetaId) {
@@ -1522,11 +1561,16 @@ async function ocrBatch(docs, donde) {
       if (ocrStop) break;
       const doc = state.docs.find((d) => d.id === original.id);
       if (!doc || doc.estadoOcr !== 'pendiente') continue;
-      busy(`Reconociendo texto… ${i + 1} de ${docs.length}`, { fraction: i / docs.length, sub: doc.name });
+      const head = `Reconociendo texto… ${i + 1} de ${docs.length}`;
+      busy(head, { fraction: i / docs.length, sub: doc.name });
       try {
         const blob = await pdfBlobOf(doc);
-        if (blob.size > OCR_MAX_BYTES) throw new Error('es muy grande para el OCR (máx. 20 MB)');
-        const res = await cloud.runOcr(blob);
+        const res = await ocrDocument(blob, (hecho, total) =>
+          busy(head, {
+            fraction: (i + hecho / total) / docs.length,
+            sub: total > OCR_TRAMO ? `${doc.name} · ${hecho} de ${total} páginas` : doc.name,
+          }),
+        );
         await updateDoc(doc.id, { textoOcr: res.texto, estadoOcr: 'completado' });
         if (inCloud(doc)) await cloud.setOcr(doc.id, res.texto, 'completado');
         const sugerido = sanitizeName(res.nombre_sugerido || '').slice(0, 120);
@@ -1539,7 +1583,10 @@ async function ocrBatch(docs, donde) {
         seguidos = 0;
       } catch (error) {
         errores.push(`«${doc.name}»: ${error.message}`);
-        if (++seguidos >= 3) {
+        // Solo las fallas de conexión o del servicio cuentan; las de un documento, no.
+        const servicio = /conexión|internet/i.test(error.message) || error.status === 401 || error.status >= 429;
+        if (!servicio) seguidos = 0;
+        else if (++seguidos >= 3) {
           errores.push('Se detuvo tras 3 errores seguidos. Revisa tu conexión o el servicio de OCR e inténtalo de nuevo.');
           break;
         }
