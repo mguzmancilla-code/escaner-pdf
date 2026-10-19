@@ -90,6 +90,8 @@ for (const id of [
   'annotate', 'annCancel', 'annSave', 'annTools', 'annHint', 'annPages',
   'busy', 'busyText', 'busySpinner', 'busyBar', 'busyBarFill', 'busySub', 'busyStop', 'toast',
   'cameraInput', 'imagesInput', 'pdfInput', 'folderInput', 'mixedInput',
+  'textx', 'txClose', 'txCopy', 'txHint', 'txCamera', 'txImages', 'txPaste', 'txThumbs', 'txText', 'txCount',
+  'txTxt', 'txDocx', 'txClear', 'txCameraInput', 'txImagesInput',
 ]) el[id] = $(id);
 
 const state = {
@@ -426,6 +428,7 @@ function renderLibSide() {
   nodes.push(boton({ icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() }));
   nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
+  nodes.push(boton({ icon: 'textT', label: 'Extraer texto de imágenes', run: () => openTextx() }));
   if (inCloud) {
     const pendientes = pendingOcrDocs();
     if (pendientes.length) {
@@ -774,6 +777,7 @@ function addMenu() {
   options.push({ label: 'Importar PDF', run: () => el.pdfInput.click() });
   options.push({ label: 'Importar todo: PDF e imágenes (CamScanner)', run: importMenu });
   options.push({ label: 'Combinar PDF', run: openCombine });
+  options.push({ label: 'Extraer texto de imágenes', run: () => openTextx() });
   const pendientes = signedIn() ? pendingOcrDocs() : [];
   if (pendientes.length) {
     options.push({ label: `Reconocer texto de todos los pendientes (${pendientes.length})`, run: () => ocrBatch(pendingOcrDocs()) });
@@ -1413,6 +1417,7 @@ function toolsMenu() {
   const opciones = [
     { label: doc.favorito ? '★ Quitar de favoritos' : '☆ Agregar a favoritos', run: () => toggleFavorite(doc) },
     { label: 'Anotar / firmar', run: () => openAnnotate(doc) },
+    { label: 'Copiar / exportar texto', run: () => textxFromDoc(doc) },
   ];
   if (signedIn() && doc.userId && ['pendiente', 'error'].includes(doc.sync)) {
     opciones.push({
@@ -1607,6 +1612,150 @@ async function ocrBatch(docs, donde) {
   if (errores.length) {
     const lista = errores.slice(0, 15).join('\n') + (errores.length > 15 ? '\n…' : '');
     setTimeout(() => alert(`Quedaron pendientes:\n\n${lista}`), 300);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Herramienta: Extraer texto (de imágenes o de un documento) para copiar o exportar
+// ---------------------------------------------------------------------------
+
+const textx = { name: '', images: [] }; // images: miniaturas (object URLs) de lo reconocido
+
+function openTextx({ text = '', name = '', hint = '' } = {}) {
+  textx.name = name;
+  el.txText.value = text;
+  el.txHint.textContent =
+    hint ||
+    (isIOS()
+      ? 'Toma una foto o elige imágenes: se reconoce su texto para copiarlo o exportarlo.'
+      : 'Elige imágenes o pega una captura (Ctrl + V): se reconoce su texto para copiarlo o exportarlo.');
+  renderTextxThumbs();
+  updateTextxButtons();
+  el.textx.hidden = false;
+}
+
+function closeTextx() {
+  if (el.txText.value.trim() && el.txText.dataset.dirty === '1' && !confirm('¿Cerrar? El texto no guardado se perderá.')) return;
+  textx.images.forEach((url) => URL.revokeObjectURL(url));
+  textx.images = [];
+  el.txText.dataset.dirty = '';
+  el.textx.hidden = true;
+}
+
+function renderTextxThumbs() {
+  el.txThumbs.replaceChildren(
+    ...textx.images.map((url) => {
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = '';
+      return img;
+    }),
+  );
+  el.txThumbs.hidden = !textx.images.length;
+}
+
+function updateTextxButtons() {
+  const vacio = !el.txText.value.trim();
+  for (const b of [el.txCopy, el.txTxt, el.txDocx, el.txClear]) b.disabled = vacio;
+  el.txCount.textContent = vacio ? '' : `${el.txText.value.trim().split(/\s+/).length} palabras`;
+}
+
+/** Reconoce el texto de una o más imágenes y lo agrega al cuadro de texto. */
+async function textxFromImages(files) {
+  files = [...files].filter(isImageFile);
+  if (!files.length) return;
+  if (!signedIn()) return toast('Inicia sesión para reconocer texto (el OCR funciona en la nube).');
+  if (!navigator.onLine) return toast('Necesitas conexión a internet para reconocer texto.');
+  busy('Preparando imágenes…');
+  try {
+    const pages = [];
+    for (const [i, file] of files.entries()) {
+      busy('Preparando imágenes…', { fraction: i / files.length, sub: file.name || 'Imagen pegada' });
+      const out = await resizeJpeg(file, 2000, 0.85);
+      pages.push({ jpeg: out.blob, width: out.width, height: out.height });
+      textx.images.push(URL.createObjectURL((await resizeJpeg(out.blob, 200, 0.7)).blob));
+    }
+    renderTextxThumbs();
+    const pdf = buildPdf(pages, { pageSize: 'fit', title: 'ocr' });
+    busy('Reconociendo texto…');
+    const res = await ocrDocument(pdf, (hecho, total) =>
+      busy('Reconociendo texto…', { fraction: hecho / total, sub: `${hecho} de ${total} imágenes` }),
+    );
+    const texto = (res.texto || '').trim();
+    if (!texto) {
+      toast('No se encontró texto en la imagen.');
+      return;
+    }
+    const previo = el.txText.value.trim();
+    el.txText.value = previo ? `${previo}\n\n${texto}` : texto;
+    if (!textx.name) textx.name = sanitizeName(res.nombre_sugerido || '') || '';
+    el.txText.dataset.dirty = '1';
+    updateTextxButtons();
+    toast('Texto reconocido. Puedes corregirlo antes de copiar o exportar.');
+  } catch (error) {
+    toast(`No se pudo reconocer el texto: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+/** Abre la herramienta con el texto de un documento (si no tiene, ofrece reconocerlo). */
+async function textxFromDoc(doc) {
+  if (doc.textoOcr?.trim()) {
+    openTextx({ text: doc.textoOcr.trim(), name: doc.name, hint: `Texto de «${doc.name}». Puedes corregirlo antes de copiar o exportar.` });
+    return;
+  }
+  if (!signedIn()) return toast('Este documento aún no tiene texto. Inicia sesión para reconocerlo con OCR.');
+  if (!confirm(`«${doc.name}» todavía no tiene texto reconocido. ¿Reconocerlo ahora con OCR?`)) return;
+  busy('Reconociendo texto…');
+  try {
+    const res = await ocrDocument(await pdfBlobOf(doc), (hecho, total) =>
+      busy('Reconociendo texto…', { fraction: hecho / total, sub: `${hecho} de ${total} páginas` }),
+    );
+    await updateDoc(doc.id, { textoOcr: res.texto, estadoOcr: 'completado' });
+    if (inCloud(doc)) await cloud.setOcr(doc.id, res.texto, 'completado');
+    renderLibrary();
+    busy(null);
+    openTextx({ text: (res.texto || '').trim(), name: doc.name, hint: `Texto de «${doc.name}». Puedes corregirlo antes de copiar o exportar.` });
+  } catch (error) {
+    busy(null);
+    toast(`No se pudo reconocer el texto: ${error.message}`);
+  }
+}
+
+async function copyText(texto) {
+  try {
+    await navigator.clipboard.writeText(texto);
+  } catch {
+    // Respaldo para navegadores sin permiso de portapapeles.
+    el.txText.select();
+    document.execCommand('copy');
+  }
+  toast('Texto copiado. Ya puedes pegarlo donde quieras.');
+}
+
+function textxFileName(ext) {
+  return `${sanitizeName(textx.name) || `Texto ${defaultName().replace(/^Escaneo /, '')}`}.${ext}`;
+}
+
+async function exportTextx(formato) {
+  const texto = el.txText.value.trim();
+  if (!texto) return;
+  try {
+    if (formato === 'txt') {
+      // BOM para que el Bloc de notas y Excel reconozcan los acentos (UTF-8).
+      await shareOrDownload(new File(['﻿', texto.replace(/\r?\n/g, '\r\n')], textxFileName('txt'), { type: 'text/plain' }));
+    } else {
+      busy('Creando Word…');
+      const office = await import('./office.js');
+      const docx = await office.textToDocx(texto.split(/\r?\n/));
+      await shareOrDownload(new File([docx], textxFileName('docx'), { type: docx.type }));
+    }
+    el.txText.dataset.dirty = '';
+  } catch (error) {
+    toast(`No se pudo exportar: ${error.message}`);
+  } finally {
+    busy(null);
   }
 }
 
@@ -3559,6 +3708,63 @@ function setup() {
     el.busyStop.hidden = true;
     el.busySub.textContent = 'Deteniendo al terminar el documento actual…';
   });
+  // Extraer texto
+  el.txClose.addEventListener('click', closeTextx);
+  el.txCamera.addEventListener('click', () => el.txCameraInput.click());
+  el.txImages.addEventListener('click', () => el.txImagesInput.click());
+  for (const input of [el.txCameraInput, el.txImagesInput]) {
+    input.addEventListener('change', () => {
+      const files = [...input.files];
+      input.value = '';
+      textxFromImages(files);
+    });
+  }
+  el.txPaste.addEventListener('click', async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      const blobs = [];
+      for (const item of items) {
+        const type = item.types.find((t) => t.startsWith('image/'));
+        if (type) blobs.push(new File([await item.getType(type)], 'Imagen pegada', { type }));
+      }
+      if (blobs.length) textxFromImages(blobs);
+      else toast('No hay ninguna imagen copiada. Copia una captura y vuelve a intentarlo.');
+    } catch {
+      toast('Pega la imagen con Ctrl + V (o mantén presionado y elige «Pegar»).');
+    }
+  });
+  document.addEventListener('paste', (event) => {
+    if (el.textx.hidden) return;
+    const files = [...(event.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return; // texto: se pega normal en el cuadro
+    event.preventDefault();
+    textxFromImages(files);
+  });
+  el.textx.addEventListener('dragover', (event) => event.preventDefault());
+  el.textx.addEventListener('drop', (event) => {
+    const files = [...(event.dataTransfer?.files ?? [])].filter(isImageFile);
+    if (!files.length) return;
+    event.preventDefault();
+    textxFromImages(files);
+  });
+  el.txText.addEventListener('input', () => {
+    el.txText.dataset.dirty = '1';
+    updateTextxButtons();
+  });
+  el.txCopy.addEventListener('click', () => el.txText.value.trim() && copyText(el.txText.value.trim()));
+  el.txTxt.addEventListener('click', () => exportTextx('txt'));
+  el.txDocx.addEventListener('click', () => exportTextx('docx'));
+  el.txClear.addEventListener('click', () => {
+    if (!confirm('¿Borrar el texto y empezar de nuevo?')) return;
+    el.txText.value = '';
+    el.txText.dataset.dirty = '';
+    textx.name = '';
+    textx.images.forEach((url) => URL.revokeObjectURL(url));
+    textx.images = [];
+    renderTextxThumbs();
+    updateTextxButtons();
+  });
+
   el.combCancel.addEventListener('click', closeCombine);
   el.combDo.addEventListener('click', runCombine);
   el.combImport.addEventListener('click', () => el.pdfInput.click());

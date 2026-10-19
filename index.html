@@ -205,6 +205,34 @@
     </div>
   </section>
 
+  <!-- Extraer texto -->
+  <section id="textx" class="screen sheet" hidden>
+    <header class="bar">
+      <button id="txClose" class="text-btn">Cerrar</button>
+      <h1>Extraer texto</h1>
+      <button id="txCopy" class="text-btn strong">Copiar</button>
+    </header>
+    <div class="scroll tx-body">
+      <p id="txHint" class="hint"></p>
+      <div class="tx-sources">
+        <button id="txCamera" class="btn"><span data-icon="camera"></span>Cámara</button>
+        <button id="txImages" class="btn"><span data-icon="photo"></span>Imágenes</button>
+        <button id="txPaste" class="btn"><span data-icon="files"></span>Pegar imagen</button>
+      </div>
+      <div id="txThumbs" class="tx-thumbs" hidden></div>
+      <textarea id="txText" class="tx-text" placeholder="Aquí aparecerá el texto reconocido. También puedes escribir o corregir."></textarea>
+      <div class="tx-foot">
+        <span id="txCount" class="hint"></span>
+        <div class="tx-export">
+          <button id="txTxt" class="btn">Descargar .txt</button>
+          <button id="txDocx" class="btn">Descargar Word</button>
+          <button id="txClear" class="btn danger-text">Borrar</button>
+        </div>
+      </div>
+      <p class="hint">El texto lo reconoce una IA: revisa nombres, números y montos antes de usarlo.</p>
+    </div>
+  </section>
+
   <!-- Organizar páginas -->
   <section id="organize" class="screen" hidden>
     <header class="bar">
@@ -289,5 +317,7 @@
   <input id="pdfInput" class="file-input" type="file" accept="application/pdf,.pdf" multiple>
   <input id="folderInput" class="file-input" type="file" webkitdirectory multiple>
   <input id="mixedInput" class="file-input" type="file" accept="application/pdf,.pdf,image/*" multiple>
+  <input id="txCameraInput" class="file-input" type="file" accept="image/*" capture="environment">
+  <input id="txImagesInput" class="file-input" type="file" accept="image/*" multiple>
 </body>
 </html>

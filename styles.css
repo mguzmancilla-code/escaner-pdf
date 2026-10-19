@@ -355,6 +355,20 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .doc-row.selected-row { background: var(--accent-soft); }
 .comb-import { width: 100%; }
 
+/* ---------- Extraer texto ---------- */
+.tx-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; max-width: 860px; width: 100%; margin: 0 auto; }
+.tx-sources { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tx-sources .btn { min-height: 46px; padding: 0 10px; font-size: 15px; }
+.tx-thumbs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.tx-thumbs img { height: 72px; border-radius: 8px; border: 0.5px solid var(--separator); flex: none; }
+.tx-text { width: 100%; min-height: 44vh; resize: vertical; padding: 14px 16px; border: 0.5px solid var(--separator); border-radius: var(--radius); background: var(--surface); color: var(--text); font: 15px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; outline: none; }
+.tx-text:focus { border-color: var(--accent); }
+.tx-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.tx-export { display: flex; flex-wrap: wrap; gap: 8px; }
+.tx-export .btn { min-height: 42px; font-size: 15px; }
+.tx-export .btn:disabled, .text-btn:disabled { opacity: 0.4; pointer-events: none; }
+@media (max-width: 480px) { .tx-sources .btn span[data-icon] { display: none; } .tx-export { width: 100%; } .tx-export .btn { flex: 1; padding: 0 8px; } }
+
 /* ---------- Organizar páginas ---------- */
 
 .org-hint { margin: 8px 16px 0; }
