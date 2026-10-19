@@ -1590,6 +1590,7 @@ async function ocrBatch(docs, donde) {
         errores.push(`«${doc.name}»: ${error.message}`);
         // Solo las fallas de conexión o del servicio cuentan; las de un documento, no.
         const servicio = /conexión|internet/i.test(error.message) || error.status === 401 || error.status >= 429;
+        if (error.status === 402) break; // sin saldo: ninguno más va a funcionar
         if (!servicio) seguidos = 0;
         else if (++seguidos >= 3) {
           errores.push('Se detuvo tras 3 errores seguidos. Revisa tu conexión o el servicio de OCR e inténtalo de nuevo.');

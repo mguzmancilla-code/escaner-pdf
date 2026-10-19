@@ -259,7 +259,10 @@ export async function runOcr(pdfBlob) {
         if (body.detalle) {
           try {
             const motivo = JSON.parse(body.detalle)?.error?.message;
-            if (motivo) msg += ` (${motivo})`;
+            if (/credit balance/i.test(motivo || '')) {
+              msg = 'La cuenta de Anthropic no tiene saldo. Recarga créditos en console.anthropic.com › Plans & Billing.';
+              status = 402;
+            } else if (motivo) msg += ` (${motivo})`;
           } catch {
             msg += ` (${String(body.detalle).slice(0, 160)})`;
           }
