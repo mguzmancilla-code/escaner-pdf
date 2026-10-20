@@ -58,6 +58,7 @@ const ICONS = {
   redactbox: '<rect x="4" y="6" width="16" height="12" rx="1" fill="currentColor"/>',
   signature: '<path d="M4 17c3 0 3-10 6-10s0 10 3 10 2-6 4-6 2 2 3 2"/>',
   stamp: '<rect x="5" y="14" width="14" height="6" rx="1"/><path d="M12 14V9M9 4h6a2 2 0 0 1 2 2c0 2-2 2-2 3H9c0-1-2-1-2-3a2 2 0 0 1 2-2z"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8-4.2-4.1 5.9-.9z"/>',
   sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
@@ -92,6 +93,7 @@ for (const id of [
   'cameraInput', 'imagesInput', 'pdfInput', 'folderInput', 'mixedInput',
   'textx', 'txClose', 'txCopy', 'txHint', 'txCamera', 'txImages', 'txPaste', 'txThumbs', 'txText', 'txCount',
   'txTxt', 'txDocx', 'txClear', 'txCameraInput', 'txImagesInput',
+  'protect', 'prClose', 'prTitle', 'prPass', 'prPass2', 'prShow', 'prHint', 'prPrint', 'prCopy', 'prEdit', 'prPermsHint', 'prDo',
 ]) el[id] = $(id);
 
 const state = {
@@ -429,6 +431,7 @@ function renderLibSide() {
   nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
   nodes.push(boton({ icon: 'doc', label: 'Convertir PDF', run: () => pickDocument('Convertir…', convertMenu) }));
+  nodes.push(boton({ icon: 'lock', label: 'Proteger PDF', run: () => pickDocument('Proteger con contraseña…', openProtect) }));
   nodes.push(boton({ icon: 'pages', label: 'Organizar páginas', run: () => pickDocument('Organizar páginas de…', openOrganize) }));
   nodes.push(
     boton({ icon: 'extract', label: 'Extraer páginas', run: () => pickDocument('Extraer páginas de…', (d) => openOrganize(d, { mode: 'extract' })) }),
@@ -1772,6 +1775,7 @@ function toolsMenu() {
     { label: 'Organizar páginas', run: () => openOrganize(doc) },
     { label: 'Extraer páginas', run: () => openOrganize(doc, { mode: 'extract' }) },
     { label: 'Convertir a… (Word, ePub, HTML, RTF, texto, imágenes)', run: () => convertMenu(doc) },
+    { label: 'Proteger con contraseña', run: () => openProtect(doc) },
     { label: 'Renombrar', run: renameCurrent },
   );
   chooseAction(doc.name, opciones);
@@ -2091,6 +2095,76 @@ async function exportTextx(formato) {
     el.txText.dataset.dirty = '';
   } catch (error) {
     toast(`No se pudo exportar: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Herramienta: Proteger PDF con contraseña
+// ---------------------------------------------------------------------------
+
+let protectDoc = null;
+
+function openProtect(doc) {
+  protectDoc = doc;
+  el.prTitle.textContent = doc.name;
+  el.prPass.value = '';
+  el.prPass2.value = '';
+  el.prShow.checked = false;
+  for (const c of [el.prPrint, el.prCopy, el.prEdit]) c.checked = true;
+  updateProtect();
+  el.protect.hidden = false;
+  setTimeout(() => el.prPass.focus(), 50);
+}
+
+function closeProtect() {
+  el.prPass.value = '';
+  el.prPass2.value = '';
+  protectDoc = null;
+  el.protect.hidden = true;
+}
+
+function updateProtect() {
+  const tipo = el.prShow.checked ? 'text' : 'password';
+  el.prPass.type = tipo;
+  el.prPass2.type = tipo;
+  const p = el.prPass.value;
+  let msg = '';
+  let ok = false;
+  if (!p) msg = 'Escribe una contraseña de al menos 6 caracteres.';
+  else if (p.length < 6) msg = 'Muy corta: usa al menos 6 caracteres.';
+  else if (el.prPass2.value !== p) msg = el.prPass2.value ? 'Las contraseñas no coinciden.' : 'Repite la contraseña para confirmarla.';
+  else {
+    ok = true;
+    const variedad = [/[a-z]/, /[A-Z]/, /\d/, /[^a-zA-Z\d]/].filter((r) => r.test(p)).length;
+    msg = p.length >= 12 || (p.length >= 10 && variedad >= 3) ? 'Contraseña segura.' : 'Válida. Más larga o con números y símbolos es más segura.';
+  }
+  el.prHint.textContent = msg;
+  el.prHint.classList.toggle('ok', ok);
+  el.prDo.disabled = !ok;
+  const restringe = !(el.prPrint.checked && el.prCopy.checked && el.prEdit.checked);
+  el.prPermsHint.hidden = !restringe;
+}
+
+async function runProtect() {
+  const doc = protectDoc;
+  if (!doc || el.prDo.disabled) return;
+  busy('Protegiendo PDF…');
+  try {
+    const { protectPdf } = await import('./pdfcrypt.js');
+    const out = await protectPdf(await pdfBlobOf(doc), {
+      password: el.prPass.value,
+      imprimir: el.prPrint.checked,
+      copiar: el.prCopy.checked,
+      modificar: el.prEdit.checked,
+    });
+    closeProtect();
+    busy(null);
+    await shareOrDownload(new File([out], `${sanitizeName(doc.name)} (protegido).pdf`, { type: 'application/pdf' }));
+    toast('PDF protegido listo. Guarda bien la contraseña: si se olvida, no se puede recuperar.');
+  } catch (error) {
+    toast(`No se pudo proteger: ${error.message}`);
   } finally {
     busy(null);
   }
@@ -4159,6 +4233,14 @@ function setup() {
     el.busyStop.hidden = true;
     el.busySub.textContent = 'Deteniendo al terminar el documento actual…';
   });
+  // Proteger PDF
+  el.prClose.addEventListener('click', closeProtect);
+  for (const c of [el.prPass, el.prPass2, el.prShow, el.prPrint, el.prCopy, el.prEdit]) c.addEventListener('input', updateProtect);
+  el.protect.addEventListener('submit', (event) => {
+    event.preventDefault();
+    runProtect();
+  });
+
   // Extraer texto
   el.txClose.addEventListener('click', closeTextx);
   el.txCamera.addEventListener('click', () => el.txCameraInput.click());

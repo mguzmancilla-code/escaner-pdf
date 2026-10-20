@@ -355,6 +355,19 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .doc-row.selected-row { background: var(--accent-soft); }
 .comb-import { width: 100%; }
 
+/* ---------- Proteger PDF ---------- */
+.pr-body { display: flex; flex-direction: column; gap: 10px; padding: 20px 16px 32px; max-width: 520px; width: 100%; margin: 0 auto; }
+.pr-body > *, .tx-body > * { flex-shrink: 0; } /* en una columna con scroll, los grupos no deben encogerse */
+.pr-doc { margin: 0; text-align: center; font-weight: 600; font-size: 17px; overflow-wrap: anywhere; }
+.pr-check { display: flex; align-items: center; gap: 10px; padding: 10px 4px; font-size: 15px; cursor: pointer; }
+.pr-perms .pr-check { padding: 12px 16px; }
+.pr-perms .pr-check + .pr-check { border-top: 0.5px solid var(--separator); }
+.pr-check input { width: 20px; height: 20px; accent-color: var(--accent); }
+.pr-hint { min-height: 1.3em; }
+.pr-hint.ok { color: #30a46c; }
+.pr-sub { margin: 10px 4px 0; }
+.btn:disabled { opacity: 0.45; pointer-events: none; }
+
 /* ---------- Extraer texto ---------- */
 .tx-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; max-width: 860px; width: 100%; margin: 0 auto; }
 .tx-sources { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }

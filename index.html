@@ -205,6 +205,37 @@
     </div>
   </section>
 
+  <!-- Proteger PDF -->
+  <section id="protect" class="screen sheet" hidden>
+    <header class="bar">
+      <button id="prClose" class="text-btn" type="button">Cancelar</button>
+      <h1>Proteger PDF</h1>
+      <span></span>
+    </header>
+    <form class="scroll pr-body" novalidate autocomplete="off">
+      <div class="empty-icon" data-icon="lock"></div>
+      <p id="prTitle" class="pr-doc"></p>
+      <p class="hint center">Se crea una <strong>copia protegida</strong> para enviar o guardar. Tu documento en AgneScan no cambia.</p>
+      <div class="group">
+        <input id="prPass" class="row-input" type="password" placeholder="Contraseña para abrir el PDF" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+        <input id="prPass2" class="row-input" type="password" placeholder="Repite la contraseña" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+      </div>
+      <label class="pr-check"><input id="prShow" type="checkbox"> Mostrar contraseña</label>
+      <p id="prHint" class="hint pr-hint"></p>
+
+      <p class="section-title pr-sub">Al abrirlo, permitir:</p>
+      <div class="group pr-perms">
+        <label class="pr-check"><input id="prPrint" type="checkbox" checked> Imprimir</label>
+        <label class="pr-check"><input id="prCopy" type="checkbox" checked> Copiar texto e imágenes</label>
+        <label class="pr-check"><input id="prEdit" type="checkbox" checked> Modificar, anotar y rellenar</label>
+      </div>
+      <p id="prPermsHint" class="hint" hidden>Las restricciones las respetan Adobe Reader, Chrome, Edge y la mayoría de los lectores, pero algunos programas pueden ignorarlas. La contraseña para abrir sí protege siempre el contenido.</p>
+
+      <button id="prDo" class="btn primary auth-submit" type="submit" disabled>Crear PDF protegido</button>
+      <p class="hint center">Cifrado AES-256, compatible con Adobe Reader, Chrome, Edge, Vista Previa y iPhone. La contraseña no se envía a ningún servidor y, si se olvida, no hay forma de recuperarla.</p>
+    </form>
+  </section>
+
   <!-- Extraer texto -->
   <section id="textx" class="screen sheet" hidden>
     <header class="bar">
