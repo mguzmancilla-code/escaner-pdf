@@ -152,6 +152,44 @@ export async function uploadDocument(doc) {
   return { remotePath, thumbPath };
 }
 
+/**
+ * Guarda un PDF modificado como versión nueva del mismo documento. Las
+ * versiones anteriores se conservan en la nube (la 1 es siempre el original).
+ * @returns {{ remotePath: string, thumbPath: string|null }}
+ */
+export async function uploadNewVersion(doc, { pdf, thumb, pageCount, textoOcr }) {
+  const user = requireUser();
+  const base = `${user.id}/${doc.id}`;
+  const { data: versiones, error: e1 } = await supabase
+    .from('documento_versiones')
+    .select('numero')
+    .eq('documento_id', doc.id);
+  check(e1, 'No se pudo leer el historial del documento');
+  const numero = Math.max(1, ...(versiones ?? []).map((v) => v.numero)) + 1;
+  const remotePath = `${base}/v${numero}.pdf`;
+  // Archivo de miniatura nuevo por versión: los archivos existentes no se sobrescriben.
+  const thumbPath = thumb ? `${base}/miniatura-v${numero}.jpg` : doc.thumbPath ?? null;
+
+  await putFile(remotePath, pdf, 'application/pdf');
+  if (thumb) await putFile(thumbPath, thumb, 'image/jpeg');
+
+  let { error } = await supabase.from('documento_versiones').insert({
+    documento_id: doc.id,
+    numero,
+    storage_path: remotePath,
+    tamano_bytes: pdf.size,
+    paginas: pageCount ?? null,
+    motivo: 'mejora',
+  });
+  check(error, 'No se pudo registrar la versión');
+
+  const cambios = { version_actual: numero, paginas: pageCount ?? null, miniatura_path: thumbPath };
+  if (textoOcr !== undefined) cambios.texto_ocr = textoOcr;
+  ({ error } = await supabase.from('documentos').update(cambios).eq('id', doc.id));
+  check(error, 'No se pudo actualizar el documento');
+  return { remotePath, thumbPath };
+}
+
 export async function renameDocument(id, nombre) {
   const { error } = await supabase.from('documentos').update({ nombre }).eq('id', id);
   check(error, 'No se pudo renombrar el documento');

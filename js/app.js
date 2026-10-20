@@ -428,6 +428,7 @@ function renderLibSide() {
   nodes.push(boton({ icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() }));
   nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
+  nodes.push(boton({ icon: 'pages', label: 'Organizar páginas', run: () => pickDocument('Organizar páginas de…', openOrganize) }));
   nodes.push(boton({ icon: 'textT', label: 'Extraer texto de imágenes', run: () => openTextx() }));
   if (inCloud) {
     const pendientes = pendingOcrDocs();
@@ -771,6 +772,24 @@ function chooseFolder(title, currentId) {
   });
 }
 
+/** Elige un documento de la biblioteca (los más recientes primero) y ejecuta la acción. */
+function pickDocument(title, run) {
+  const docs = visibleDocs()
+    .filter((d) => d.pdf || d.remotePath)
+    .sort((a, b) => b.created - a.created);
+  if (!docs.length) return toast('Aún no tienes documentos.');
+  const actual = state.folderId;
+  // Primero los de la carpeta abierta; luego el resto.
+  const orden = [...docs.filter((d) => (d.carpetaId ?? null) === actual), ...docs.filter((d) => (d.carpetaId ?? null) !== actual)];
+  chooseAction(
+    title,
+    orden.slice(0, 60).map((d) => ({
+      label: `${d.name} · ${d.pageCount || '?'} pág.`,
+      run: () => run(d),
+    })),
+  );
+}
+
 function addMenu() {
   const options = [];
   if (signedIn()) options.push({ label: 'Nueva carpeta', run: newFolder });
@@ -864,6 +883,7 @@ function syncFromCloud() {
         } else if (local.sync !== 'subiendo' && Object.keys(fields).some((key) => local[key] !== fields[key])) {
           // Si cambió la versión (fase 5), la copia local del PDF deja de servir.
           const stale = local.remotePath && fields.remotePath !== local.remotePath ? { pdf: null, previews: null } : {};
+          if (local.thumbPath && fields.thumbPath !== local.thumbPath) stale.thumb = null; // se descarga la nueva
           await updateDoc(row.id, { ...fields, ...stale });
         }
       }
@@ -1114,7 +1134,7 @@ async function pdfBlobOf(doc) {
 // Herramienta: Organizar páginas
 // ---------------------------------------------------------------------------
 
-let org = null; // { docName, sources, pages, selected, nextSource, drag }
+let org = null; // { docId, docName, sources, pages, selected, nextSource, drag, history, urls, changed, anchor }
 
 async function openOrganize(doc) {
   busy('Abriendo páginas…', { fraction: 0 });
@@ -1125,17 +1145,17 @@ async function openOrganize(doc) {
       busy('Abriendo páginas…', { fraction: n / t, sub: `Página ${n} de ${t}` }),
     );
     org = {
+      docId: doc.id,
       docName: doc.name,
       sources: { 0: blob },
       nextSource: 1,
       selected: new Set(),
+      anchor: null, // última página tocada (para seleccionar un rango con Mayús)
       drag: null,
-      pages: thumbs.map((thumbBlob, index) => ({
-        source: '0',
-        index,
-        rotate: 0,
-        url: URL.createObjectURL(thumbBlob),
-      })),
+      history: [],
+      changed: false,
+      urls: [],
+      pages: thumbs.map((thumbBlob, index) => ({ source: '0', index, rotate: 0, url: orgUrl(thumbBlob) })),
     };
     renderOrganize();
     el.organize.hidden = false;
@@ -1146,39 +1166,119 @@ async function openOrganize(doc) {
   }
 }
 
-function closeOrganize() {
-  org?.pages.forEach((p) => URL.revokeObjectURL(p.url));
+/** URL de miniatura; se liberan todas al cerrar (deshacer puede volver a necesitarlas). */
+function orgUrl(blob) {
+  const url = URL.createObjectURL(blob);
+  org?.urls.push(url);
+  return url;
+}
+
+function closeOrganize(force = false) {
+  if (!force && org?.changed && !confirm('¿Salir sin guardar? Se perderán los cambios en las páginas.')) return;
+  org?.urls.forEach((url) => URL.revokeObjectURL(url));
   org = null;
   el.organize.hidden = true;
 }
 
+/** Guarda el estado actual para poder deshacer el próximo cambio. */
+function pushHistory() {
+  org.history.push({ pages: org.pages.map((p) => ({ ...p })), selected: new Set(org.selected) });
+  if (org.history.length > 50) org.history.shift();
+  org.changed = true;
+}
+
+function undoOrganize() {
+  const prev = org?.history.pop();
+  if (!prev) return;
+  org.pages = prev.pages;
+  org.selected = prev.selected;
+  org.changed = org.history.length > 0;
+  renderOrganize();
+}
+
 function renderOrganize() {
-  el.orgTitle.textContent = `${org.pages.length} ${org.pages.length === 1 ? 'página' : 'páginas'}`;
-  el.orgHint.textContent = org.selected.size
-    ? `${org.selected.size} seleccionada(s)`
-    : 'Toca para seleccionar. Arrastra ⠿ para reordenar.';
+  const total = org.pages.length;
+  el.orgTitle.textContent = `${total} ${total === 1 ? 'página' : 'páginas'}`;
+
+  const sel = org.selected.size;
+  const texto = sel
+    ? `${sel} ${sel === 1 ? 'seleccionada' : 'seleccionadas'}`
+    : isIOS() || matchMedia('(pointer: coarse)').matches
+      ? 'Toca para seleccionar. Arrastra ⠿ para reordenar.'
+      : 'Clic para seleccionar (Mayús + clic: un rango). Arrastra para reordenar.';
+  const hint = document.createElement('span');
+  hint.textContent = texto;
+  const links = [
+    sel === total
+      ? { label: 'Quitar selección', run: () => setSelection([]) }
+      : { label: 'Seleccionar todas', run: () => setSelection(org.pages.map((_, i) => i)) },
+  ];
+  if (org.history.length) links.push({ label: 'Deshacer', run: undoOrganize });
+  el.orgHint.replaceChildren(
+    hint,
+    ...links.map((l) => {
+      const b = document.createElement('button');
+      b.className = 'org-link';
+      b.textContent = l.label;
+      b.addEventListener('click', l.run);
+      return b;
+    }),
+  );
 
   el.orgGrid.replaceChildren(
     ...org.pages.map((page, i) => {
       const card = document.createElement('div');
-      card.className = `org-card${org.selected.has(i) ? ' selected' : ''}`;
+      card.className = `org-card${org.selected.has(i) ? ' selected' : ''}${org.drag?.from === i ? ' dragging' : ''}`;
       card.dataset.i = i;
       card.innerHTML = `
-        <div class="org-thumb" style="transform: rotate(${page.rotate}deg)"><img alt="" src="${page.url}"></div>
+        <div class="org-thumb" style="transform: rotate(${page.rotate}deg)"><img alt="" src="${page.url}" draggable="false"></div>
         <span class="org-num">${i + 1}</span>
         <span class="org-check">${icon('check')}</span>
         <span class="org-handle" data-handle>${icon('drag')}</span>`;
       card.addEventListener('click', (e) => {
-        if (e.target.closest('[data-handle]')) return;
-        if (org.selected.has(i)) org.selected.delete(i);
-        else org.selected.add(i);
-        renderOrganize();
+        if (e.target.closest('[data-handle]') || org.suppressClick) {
+          org.suppressClick = false;
+          return;
+        }
+        toggleSelect(i, e.shiftKey);
       });
       card.querySelector('[data-handle]').addEventListener('pointerdown', (e) => startDrag(e, i));
+      // Con mouse se puede arrastrar la tarjeta completa (tras moverla unos píxeles).
+      card.addEventListener('pointerdown', (e) => {
+        if (e.pointerType !== 'mouse' || e.button !== 0 || e.target.closest('[data-handle]')) return;
+        const [x0, y0] = [e.clientX, e.clientY];
+        const move = (ev) => {
+          if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+          stop();
+          org.suppressClick = true;
+          startDrag(ev, i);
+        };
+        const stop = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', stop);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', stop);
+      });
       return card;
     }),
   );
   renderOrgActions();
+}
+
+function setSelection(indices) {
+  org.selected = new Set(indices);
+  renderOrganize();
+}
+
+function toggleSelect(i, range) {
+  if (range && org.anchor != null) {
+    const [a, b] = [Math.min(org.anchor, i), Math.max(org.anchor, i)];
+    for (let k = a; k <= b; k++) org.selected.add(k);
+  } else if (org.selected.has(i)) org.selected.delete(i);
+  else org.selected.add(i);
+  org.anchor = i;
+  renderOrganize();
 }
 
 function renderOrgActions() {
@@ -1187,11 +1287,13 @@ function renderOrgActions() {
     ? [
         { icon: 'rotateLeft', label: 'Girar', run: () => rotateSelected(-90) },
         { icon: 'rotateRight', label: 'Girar', run: () => rotateSelected(90) },
+        { icon: 'drag', label: 'Mover', run: moveMenu },
         { icon: 'extract', label: 'Extraer', run: extractSelected },
         { icon: 'trash', label: 'Eliminar', danger: true, run: deleteSelected },
       ]
     : [
         { icon: 'insert', label: 'Insertar', run: insertPages },
+        { icon: 'rotateRight', label: 'Girar todas', run: () => rotateAll(90) },
         { icon: 'split', label: 'Dividir', run: splitCurrent },
       ];
   el.orgActions.replaceChildren(
@@ -1206,17 +1308,65 @@ function renderOrgActions() {
 }
 
 function rotateSelected(delta) {
+  pushHistory();
   for (const i of org.selected) org.pages[i].rotate = (((org.pages[i].rotate + delta) % 360) + 360) % 360;
   renderOrganize();
 }
 
-function deleteSelected() {
-  if (org.selected.size === org.pages.length) return toast('No puedes eliminar todas las páginas.');
-  const quedan = org.pages.filter((_, i) => !org.selected.has(i));
-  org.pages.filter((_, i) => org.selected.has(i)).forEach((p) => URL.revokeObjectURL(p.url));
-  org.pages = quedan;
-  org.selected.clear();
+function rotateAll(delta) {
+  pushHistory();
+  for (const p of org.pages) p.rotate = (((p.rotate + delta) % 360) + 360) % 360;
   renderOrganize();
+}
+
+function deleteSelected() {
+  if (!org.selected.size) return;
+  if (org.selected.size === org.pages.length) return toast('No puedes eliminar todas las páginas.');
+  pushHistory();
+  const n = org.selected.size;
+  org.pages = org.pages.filter((_, i) => !org.selected.has(i));
+  org.selected.clear();
+  org.anchor = null;
+  renderOrganize();
+  toast(`${n === 1 ? 'Página eliminada' : `${n} páginas eliminadas`}. Puedes deshacerlo.`);
+}
+
+/** Mueve las páginas seleccionadas (en bloque) a otra posición. */
+function moveSelected(where) {
+  const idx = [...org.selected].sort((a, b) => a - b);
+  const moving = idx.map((i) => org.pages[i]);
+  const rest = org.pages.filter((_, i) => !org.selected.has(i));
+  let pos;
+  if (where === 'start') pos = 0;
+  else if (where === 'end') pos = rest.length;
+  else if (where === 'prev') pos = Math.max(0, idx[0] - 1);
+  else if (where === 'next') pos = Math.min(rest.length, idx.at(-1) - (idx.length - 1) + 1);
+  else pos = org.pages.slice(0, where).filter((_, i) => !org.selected.has(i)).length; // después de la página «where»
+  pushHistory();
+  org.pages = [...rest.slice(0, pos), ...moving, ...rest.slice(pos)];
+  org.selected = new Set(moving.map((_, k) => pos + k));
+  renderOrganize();
+}
+
+function moveMenu() {
+  chooseAction(`Mover ${org.selected.size === 1 ? 'la página' : `${org.selected.size} páginas`}`, [
+    { label: 'Al inicio', run: () => moveSelected('start') },
+    { label: 'Una posición antes', run: () => moveSelected('prev') },
+    { label: 'Una posición después', run: () => moveSelected('next') },
+    { label: 'Al final', run: () => moveSelected('end') },
+    {
+      label: 'Después de la página…',
+      run: () => {
+        const n = Number(prompt(`¿Después de qué página? (0 = al inicio, ${org.pages.length} = al final)`));
+        if (Number.isInteger(n) && n >= 0 && n <= org.pages.length) moveSelected(n);
+        else if (n || n === 0) toast('Número de página no válido.');
+      },
+    },
+  ]);
+}
+
+function orgComposition() {
+  return org.pages.map((p) => ({ source: p.source, index: p.index, rotate: p.rotate }));
 }
 
 async function extractSelected() {
@@ -1226,7 +1376,7 @@ async function extractSelected() {
     const edit = await import('./pdfedit.js');
     const blob = await edit.composePages(org.sources, indices.map((i) => ({ source: org.pages[i].source, index: org.pages[i].index, rotate: org.pages[i].rotate })));
     const doc = await saveNewPdf(blob, `${org.docName} (extracto)`);
-    closeOrganize();
+    closeOrganize(true);
     renderLibrary();
     processQueue();
     openViewer(doc);
@@ -1268,6 +1418,7 @@ function insertPages() {
 /** Convierte imágenes (fotos o escaneos) en páginas PDF y las inserta en la organización. */
 async function insertImageFiles(files, fromCamera) {
   busy('Agregando páginas…', { fraction: 0 });
+  pushHistory();
   try {
     const pdftext = await import('./pdftext.js');
     for (const [idx, file] of [...files].entries()) {
@@ -1285,7 +1436,7 @@ async function insertImageFiles(files, fromCamera) {
       const sourceId = String(org.nextSource++);
       org.sources[sourceId] = pageBlob;
       const thumbs = await pdftext.renderPdfPages(pageBlob, 500);
-      thumbs.forEach((tb, i) => org.pages.push({ source: sourceId, index: i, rotate: 0, url: URL.createObjectURL(tb) }));
+      thumbs.forEach((tb, i) => org.pages.push({ source: sourceId, index: i, rotate: 0, url: orgUrl(tb) }));
     }
     renderOrganize();
   } catch (error) {
@@ -1297,6 +1448,7 @@ async function insertImageFiles(files, fromCamera) {
 
 async function insertFromFiles(files) {
   busy('Agregando páginas…', { fraction: 0 });
+  pushHistory();
   try {
     const pdftext = await import('./pdftext.js');
     for (const file of files) {
@@ -1308,9 +1460,7 @@ async function insertFromFiles(files) {
       const thumbs = await pdftext.renderPdfPages(blob, 500, (n, t) =>
         busy('Agregando páginas…', { fraction: n / t, sub: `${file.name} · página ${n} de ${t}` }),
       );
-      thumbs.forEach((thumbBlob, index) =>
-        org.pages.push({ source: sourceId, index, rotate: 0, url: URL.createObjectURL(thumbBlob) }),
-      );
+      thumbs.forEach((thumbBlob, index) => org.pages.push({ source: sourceId, index, rotate: 0, url: orgUrl(thumbBlob) }));
     }
     renderOrganize();
   } catch (error) {
@@ -1326,17 +1476,14 @@ async function splitCurrent() {
   try {
     const edit = await import('./pdfedit.js');
     // Primero se arma el PDF con el orden y giros actuales, luego se divide.
-    const compuesto = await edit.composePages(
-      org.sources,
-      org.pages.map((p) => ({ source: p.source, index: p.index, rotate: p.rotate })),
-    );
+    const compuesto = await edit.composePages(org.sources, orgComposition());
     const partes = await edit.splitPdf(compuesto, (n, t) => busy('Dividiendo…', { fraction: n / t, sub: `Página ${n} de ${t}` }));
     const base = org.docName;
     for (const [i, parte] of partes.entries()) {
       busy('Guardando…', { fraction: (i + 1) / partes.length, sub: `${i + 1} de ${partes.length}` });
       await saveNewPdf(parte.blob, `${base} — página ${parte.pageNumber}`);
     }
-    closeOrganize();
+    closeOrganize(true);
     renderLibrary();
     processQueue();
     show('library');
@@ -1348,16 +1495,22 @@ async function splitCurrent() {
   }
 }
 
-async function saveOrganized() {
+function saveOrganized() {
+  if (!org.changed) return closeOrganize(true);
+  const doc = state.docs.find((d) => d.id === org.docId);
+  chooseAction('Guardar cambios', [
+    ...(doc ? [{ label: 'Guardar en este documento', run: () => saveOrganizedInPlace(doc) }] : []),
+    { label: 'Guardar como copia nueva', run: saveOrganizedCopy },
+  ]);
+}
+
+async function saveOrganizedCopy() {
   busy('Guardando cambios…');
   try {
     const edit = await import('./pdfedit.js');
-    const blob = await edit.composePages(
-      org.sources,
-      org.pages.map((p) => ({ source: p.source, index: p.index, rotate: p.rotate })),
-    );
+    const blob = await edit.composePages(org.sources, orgComposition());
     const doc = await saveNewPdf(blob, `${org.docName} (editado)`);
-    closeOrganize();
+    closeOrganize(true);
     renderLibrary();
     processQueue();
     openViewer(doc);
@@ -1369,46 +1522,105 @@ async function saveOrganized() {
   }
 }
 
-// Reordenar arrastrando el tirador ⠿.
+/** Reemplaza el PDF del documento. En la nube queda como versión nueva (la anterior se conserva). */
+async function saveOrganizedInPlace(doc) {
+  if (doc.sync === 'subiendo') return toast('El documento se está subiendo. Espera un momento e inténtalo de nuevo.');
+  if (inCloud(doc) && !navigator.onLine) return toast('Necesitas conexión para guardar cambios en un documento de la nube.');
+  busy('Guardando cambios…');
+  try {
+    const edit = await import('./pdfedit.js');
+    const pdf = await edit.composePages(org.sources, orgComposition());
+    let pageCount = org.pages.length;
+    let thumb = null;
+    let textoOcr = doc.textoOcr ?? null;
+    try {
+      const pdftext = await import('./pdftext.js');
+      const info = await pdftext.prepareImport(pdf);
+      pageCount = info.pageCount;
+      thumb = info.thumb;
+      // Si el PDF trae texto propio se toma el nuevo; si es escaneo se conserva el del OCR.
+      if (info.text.replace(/\s/g, '').length >= Math.max(16, info.pageCount * 8)) textoOcr = info.text;
+    } catch {
+      /* sin miniatura nueva */
+    }
+    const cambios = { pdf, size: pdf.size, pageCount, previews: null, textoOcr };
+    if (thumb) cambios.thumb = thumb;
+    if (inCloud(doc)) {
+      const { remotePath, thumbPath } = await cloud.uploadNewVersion(doc, { pdf, thumb, pageCount, textoOcr });
+      Object.assign(cambios, { remotePath, thumbPath });
+    }
+    const updated = await updateDoc(doc.id, cambios);
+    closeOrganize(true);
+    renderLibrary();
+    processQueue();
+    closeViewerImages();
+    openViewer(updated);
+    toast(inCloud(doc) ? 'Cambios guardados. La versión anterior queda respaldada en la nube.' : 'Cambios guardados.');
+  } catch (error) {
+    toast(`No se pudo guardar: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+// Reordenar arrastrando (el tirador ⠿ en pantallas táctiles; la tarjeta completa con mouse).
 function startDrag(event, from) {
   event.preventDefault();
-  const card = event.target.closest('.org-card');
-  card.setPointerCapture(event.pointerId);
-  org.drag = { from, pointerId: event.pointerId, card };
-  card.classList.add('dragging');
+  pushHistory();
+  org.drag = { from, moved: false };
+  renderOrganize();
   const move = (e) => onDragMove(e);
-  const up = (e) => {
-    card.releasePointerCapture(e.pointerId);
-    card.removeEventListener('pointermove', move);
-    card.removeEventListener('pointerup', up);
-    card.removeEventListener('pointercancel', up);
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
     finishDrag();
   };
-  card.addEventListener('pointermove', move);
-  card.addEventListener('pointerup', up);
-  card.addEventListener('pointercancel', up);
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
 }
 
 function onDragMove(event) {
   if (!org?.drag) return;
+  // Desplaza la grilla si se arrastra cerca del borde superior o inferior.
+  const r = el.orgGrid.getBoundingClientRect();
+  if (event.clientY < r.top + 50) el.orgGrid.scrollBy(0, -14);
+  else if (event.clientY > r.bottom - 50) el.orgGrid.scrollBy(0, 14);
+
   const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('.org-card');
   if (!target) return;
   const to = Number(target.dataset.i);
   if (Number.isNaN(to) || to === org.drag.from) return;
   const [moved] = org.pages.splice(org.drag.from, 1);
   org.pages.splice(to, 0, moved);
-  // Mantener la selección pegada a las páginas movidas es complejo: se limpia.
-  org.selected.clear();
+  org.selected.clear(); // la selección no sigue a las páginas movidas
   org.drag.from = to;
+  org.drag.moved = true;
   renderOrganize();
-  org.drag.card = el.orgGrid.querySelector(`.org-card[data-i="${to}"]`);
-  org.drag.card?.classList.add('dragging');
 }
 
 function finishDrag() {
-  org.drag = null;
-  el.orgGrid.querySelectorAll('.dragging').forEach((c) => c.classList.remove('dragging'));
-  renderOrganize();
+  if (org?.drag && !org.drag.moved) {
+    org.history.pop(); // no hubo cambio real
+    org.changed = org.history.length > 0;
+  }
+  if (org) org.drag = null;
+  if (org) renderOrganize();
+}
+
+/** Atajos de teclado en «Organizar páginas» (computador). */
+function organizeKeys(event) {
+  if (el.organize.hidden || !org || !el.busy.hidden || document.querySelector('.action-sheet')) return;
+  if (event.target.closest?.('input, textarea')) return;
+  const mod = event.ctrlKey || event.metaKey;
+  if (mod && event.key.toLowerCase() === 'z') undoOrganize();
+  else if (mod && event.key.toLowerCase() === 'a') setSelection(org.pages.map((_, i) => i));
+  else if ((event.key === 'Delete' || event.key === 'Backspace') && org.selected.size) deleteSelected();
+  else if (event.key === 'Escape' && org.selected.size) setSelection([]);
+  else if (event.key.toLowerCase() === 'r' && !mod && org.selected.size) rotateSelected(event.shiftKey ? -90 : 90);
+  else return;
+  event.preventDefault();
 }
 
 /** Menú «Más» del visor: anotar, organizar páginas, renombrar. */
@@ -3771,11 +3983,9 @@ function setup() {
   el.combImport.addEventListener('click', () => el.pdfInput.click());
 
   // Organizar páginas
-  el.orgCancel.addEventListener('click', () => {
-    if (org?.pages.length && !confirm('¿Descartar los cambios de organización?')) return;
-    closeOrganize();
-  });
+  el.orgCancel.addEventListener('click', () => closeOrganize());
   el.orgSave.addEventListener('click', saveOrganized);
+  document.addEventListener('keydown', organizeKeys);
 
   // Anotar / firmar
   el.annCancel.addEventListener('click', () => {

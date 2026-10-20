@@ -371,7 +371,10 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 
 /* ---------- Organizar páginas ---------- */
 
-.org-hint { margin: 8px 16px 0; }
+.org-hint { margin: 8px 16px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.org-hint span { flex: 1 1 auto; }
+.org-link { color: var(--accent); font-size: 13px; font-weight: 600; padding: 4px 0; background: none; border: 0; cursor: pointer; }
+.org-card { cursor: pointer; user-select: none; -webkit-user-select: none; }
 .org-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px; padding: 12px 16px; align-content: start; }
 .org-card { position: relative; aspect-ratio: 3 / 4; border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); overflow: hidden; touch-action: pan-y; }
 .org-card.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
