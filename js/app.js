@@ -429,6 +429,9 @@ function renderLibSide() {
   nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
   nodes.push(boton({ icon: 'pages', label: 'Organizar páginas', run: () => pickDocument('Organizar páginas de…', openOrganize) }));
+  nodes.push(
+    boton({ icon: 'extract', label: 'Extraer páginas', run: () => pickDocument('Extraer páginas de…', (d) => openOrganize(d, { mode: 'extract' })) }),
+  );
   nodes.push(boton({ icon: 'textT', label: 'Extraer texto de imágenes', run: () => openTextx() }));
   if (inCloud) {
     const pendientes = pendingOcrDocs();
@@ -960,7 +963,7 @@ function syncNow() {
 // ---------------------------------------------------------------------------
 
 /** Guarda un PDF resultante como documento nuevo (local o en la nube según sesión). */
-async function saveNewPdf(blob, name) {
+async function saveNewPdf(blob, name, { carpetaId } = {}) {
   let pageCount = 0;
   let thumb = null;
   let textoOcr = null;
@@ -991,6 +994,7 @@ async function saveNewPdf(blob, name) {
     textoOcr,
     estadoOcr: textoOcr ? 'completado' : 'pendiente',
     ...newDocOwnership(),
+    ...(carpetaId !== undefined && signedIn() ? { carpetaId } : {}),
   };
   await saveDoc(doc);
   navigator.storage?.persist?.();
@@ -1136,7 +1140,7 @@ async function pdfBlobOf(doc) {
 
 let org = null; // { docId, docName, sources, pages, selected, nextSource, drag, history, urls, changed, anchor }
 
-async function openOrganize(doc) {
+async function openOrganize(doc, { mode = 'organize' } = {}) {
   busy('Abriendo páginas…', { fraction: 0 });
   try {
     const blob = await pdfBlobOf(doc);
@@ -1147,6 +1151,7 @@ async function openOrganize(doc) {
     org = {
       docId: doc.id,
       docName: doc.name,
+      mode,
       sources: { 0: blob },
       nextSource: 1,
       selected: new Set(),
@@ -1157,6 +1162,7 @@ async function openOrganize(doc) {
       urls: [],
       pages: thumbs.map((thumbBlob, index) => ({ source: '0', index, rotate: 0, url: orgUrl(thumbBlob) })),
     };
+    el.orgSave.textContent = mode === 'extract' ? 'Extraer' : 'Guardar';
     renderOrganize();
     el.organize.hidden = false;
   } catch (error) {
@@ -1198,11 +1204,14 @@ function undoOrganize() {
 
 function renderOrganize() {
   const total = org.pages.length;
-  el.orgTitle.textContent = `${total} ${total === 1 ? 'página' : 'páginas'}`;
+  el.orgTitle.textContent = org.mode === 'extract' ? 'Extraer páginas' : `${total} ${total === 1 ? 'página' : 'páginas'}`;
+  el.orgSave.disabled = org.mode === 'extract' && !org.selected.size;
 
   const sel = org.selected.size;
   const texto = sel
-    ? `${sel} ${sel === 1 ? 'seleccionada' : 'seleccionadas'}`
+    ? `${sel} ${sel === 1 ? 'seleccionada' : 'seleccionadas'}: ${pageRangesLabel([...org.selected].sort((a, b) => a - b))}`
+    : org.mode === 'extract'
+      ? 'Elige las páginas que quieres sacar a un documento nuevo.'
     : isIOS() || matchMedia('(pointer: coarse)').matches
       ? 'Toca para seleccionar. Arrastra ⠿ para reordenar.'
       : 'Clic para seleccionar (Mayús + clic: un rango). Arrastra para reordenar.';
@@ -1213,6 +1222,7 @@ function renderOrganize() {
       ? { label: 'Quitar selección', run: () => setSelection([]) }
       : { label: 'Seleccionar todas', run: () => setSelection(org.pages.map((_, i) => i)) },
   ];
+  links.push({ label: 'Elegir por número…', run: selectByNumbers });
   if (org.history.length) links.push({ label: 'Deshacer', run: undoOrganize });
   el.orgHint.replaceChildren(
     hint,
@@ -1369,18 +1379,119 @@ function orgComposition() {
   return org.pages.map((p) => ({ source: p.source, index: p.index, rotate: p.rotate }));
 }
 
+/**
+ * Interpreta páginas escritas a mano: «1-3, 7», «5-» (hasta el final), «-4»,
+ * «pares», «impares», «todas». Devuelve índices (desde 0) ordenados, o null.
+ */
+function parsePageRanges(texto, total) {
+  const out = new Set();
+  const partes = texto.toLowerCase().replace(/\s*-\s*/g, '-').split(/[,;\s]+/).filter(Boolean);
+  for (const parte of partes) {
+    if (/^(todas?|all)$/.test(parte)) for (let i = 0; i < total; i++) out.add(i);
+    else if (/^pares?$/.test(parte)) for (let i = 1; i < total; i += 2) out.add(i);
+    else if (/^impares?$/.test(parte)) for (let i = 0; i < total; i += 2) out.add(i);
+    else {
+      const m = parte.match(/^(\d*)-(\d*)$/) ?? parte.match(/^(\d+)$/);
+      if (!m || parte === '-') return null;
+      if (!m) return null;
+      const a = m[1] ? Number(m[1]) : 1;
+      const b = m.length === 2 ? a : m[2] ? Number(m[2]) : total;
+      if (a < 1 || b < a || a > total) return null;
+      for (let n = a; n <= Math.min(b, total); n++) out.add(n - 1);
+    }
+  }
+  return out.size ? [...out].sort((x, y) => x - y) : null;
+}
+
+/** Índices (desde 0) a texto compacto: [0,1,2,6] → «1-3, 7». */
+function pageRangesLabel(indices) {
+  const partes = [];
+  for (let k = 0; k < indices.length; k++) {
+    const ini = indices[k];
+    while (k + 1 < indices.length && indices[k + 1] === indices[k] + 1) k++;
+    partes.push(ini === indices[k] ? `${ini + 1}` : `${ini + 1}-${indices[k] + 1}`);
+  }
+  return partes.join(', ');
+}
+
+function selectByNumbers() {
+  const total = org.pages.length;
+  const texto = prompt(`Páginas a seleccionar (de 1 a ${total}).\nEjemplos: 1-3, 7  ·  5-  ·  pares  ·  impares`, org.selected.size ? pageRangesLabel([...org.selected].sort((a, b) => a - b)) : '');
+  if (texto == null || !texto.trim()) return;
+  const indices = parsePageRanges(texto, total);
+  if (!indices) return toast(`No se entendió «${texto}». Usa números entre 1 y ${total}, por ejemplo: 1-3, 7`);
+  org.anchor = indices.at(-1);
+  setSelection(indices);
+}
+
+/** Extrae las páginas seleccionadas a un documento nuevo (con nombre y carpeta a elección). */
 async function extractSelected() {
   const indices = [...org.selected].sort((a, b) => a - b);
+  if (!indices.length) return toast('Selecciona primero las páginas que quieres extraer.');
+  const todas = indices.length === org.pages.length;
+  const modo = await new Promise((resolve) => {
+    chooseAction(
+      `Extraer ${indices.length === 1 ? 'la página' : `${indices.length} páginas`} (${pageRangesLabel(indices)})`,
+      [
+        { label: 'En un documento nuevo', run: () => resolve('copiar') },
+        ...(todas ? [] : [{ label: 'En un documento nuevo y quitarlas del original', run: () => resolve('mover') }]),
+        ...(indices.length > 1 ? [{ label: 'Un documento por cada página', run: () => resolve('separar') }] : []),
+      ],
+      () => resolve(null),
+    );
+  });
+  if (!modo) return;
+
+  const base = sanitizeName(org.docName);
+  let nombre = `${base} (pág. ${pageRangesLabel(indices)})`;
+  if (modo !== 'separar') {
+    nombre = sanitizeName(prompt('Nombre del documento nuevo', nombre) ?? '');
+    if (!nombre) return;
+  }
+  const original = state.docs.find((d) => d.id === org.docId);
+  let carpetaId = original?.carpetaId ?? state.folderId ?? null;
+  if (signedIn() && state.folders.length) {
+    const destino = await chooseFolder('Guardar en…', carpetaId);
+    if (destino === CANCELADO) return;
+    carpetaId = destino;
+  }
+  if (modo === 'mover' && original && inCloud(original) && !navigator.onLine) {
+    return toast('Necesitas conexión para quitar páginas de un documento de la nube.');
+  }
+
   busy('Extrayendo páginas…');
   try {
     const edit = await import('./pdfedit.js');
-    const blob = await edit.composePages(org.sources, indices.map((i) => ({ source: org.pages[i].source, index: org.pages[i].index, rotate: org.pages[i].rotate })));
-    const doc = await saveNewPdf(blob, `${org.docName} (extracto)`);
+    const comp = (i) => ({ source: org.pages[i].source, index: org.pages[i].index, rotate: org.pages[i].rotate });
+    const creados = [];
+    if (modo === 'separar') {
+      for (const [k, i] of indices.entries()) {
+        busy('Extrayendo páginas…', { fraction: k / indices.length, sub: `Página ${i + 1}` });
+        const blob = await edit.composePages(org.sources, [comp(i)]);
+        creados.push(await saveNewPdf(blob, `${base} — página ${i + 1}`, { carpetaId }));
+      }
+    } else {
+      const blob = await edit.composePages(org.sources, indices.map(comp));
+      creados.push(await saveNewPdf(blob, nombre, { carpetaId }));
+    }
+    let quitadas = false;
+    if (modo === 'mover' && original) {
+      busy('Quitando páginas del original…');
+      const restantes = org.pages.map((_, i) => i).filter((i) => !org.selected.has(i));
+      await replaceDocPdf(original, await edit.composePages(org.sources, restantes.map(comp)));
+      quitadas = true;
+    }
     closeOrganize(true);
     renderLibrary();
     processQueue();
-    openViewer(doc);
-    toast(indices.length === 1 ? 'Página extraída a un PDF nuevo.' : `${indices.length} páginas extraídas a un PDF nuevo.`);
+    if (creados.length === 1) openViewer(creados[0]);
+    else show('library');
+    const n = indices.length;
+    toast(
+      modo === 'separar'
+        ? `${creados.length} documentos creados, uno por página.`
+        : `${n === 1 ? 'Página extraída' : `${n} páginas extraídas`} a «${creados[0].name}».${quitadas ? ' Se quitaron del original.' : ''}`,
+    );
   } catch (error) {
     toast(`No se pudo extraer: ${error.message}`);
   } finally {
@@ -1496,6 +1607,7 @@ async function splitCurrent() {
 }
 
 function saveOrganized() {
+  if (org.mode === 'extract') return extractSelected();
   if (!org.changed) return closeOrganize(true);
   const doc = state.docs.find((d) => d.id === org.docId);
   chooseAction('Guardar cambios', [
@@ -1522,34 +1634,41 @@ async function saveOrganizedCopy() {
   }
 }
 
-/** Reemplaza el PDF del documento. En la nube queda como versión nueva (la anterior se conserva). */
+/**
+ * Reemplaza el PDF de un documento. En la nube queda como versión nueva
+ * (la anterior se conserva). Devuelve el documento actualizado.
+ */
+async function replaceDocPdf(doc, pdf) {
+  if (doc.sync === 'subiendo') throw new Error('el documento se está subiendo; espera un momento');
+  if (inCloud(doc) && !navigator.onLine) throw new Error('necesitas conexión para cambiar un documento de la nube');
+  let pageCount = 0;
+  let thumb = null;
+  let textoOcr = doc.textoOcr ?? null;
+  try {
+    const pdftext = await import('./pdftext.js');
+    const info = await pdftext.prepareImport(pdf);
+    pageCount = info.pageCount;
+    thumb = info.thumb;
+    // Si el PDF trae texto propio se toma el nuevo; si es escaneo se conserva el del OCR.
+    if (info.text.replace(/\s/g, '').length >= Math.max(16, info.pageCount * 8)) textoOcr = info.text;
+  } catch {
+    const edit = await import('./pdfedit.js');
+    pageCount = await edit.pageCount(pdf);
+  }
+  const cambios = { pdf, size: pdf.size, pageCount, previews: null, textoOcr };
+  if (thumb) cambios.thumb = thumb;
+  if (inCloud(doc)) {
+    const { remotePath, thumbPath } = await cloud.uploadNewVersion(doc, { pdf, thumb, pageCount, textoOcr });
+    Object.assign(cambios, { remotePath, thumbPath });
+  }
+  return updateDoc(doc.id, cambios);
+}
+
 async function saveOrganizedInPlace(doc) {
-  if (doc.sync === 'subiendo') return toast('El documento se está subiendo. Espera un momento e inténtalo de nuevo.');
-  if (inCloud(doc) && !navigator.onLine) return toast('Necesitas conexión para guardar cambios en un documento de la nube.');
   busy('Guardando cambios…');
   try {
     const edit = await import('./pdfedit.js');
-    const pdf = await edit.composePages(org.sources, orgComposition());
-    let pageCount = org.pages.length;
-    let thumb = null;
-    let textoOcr = doc.textoOcr ?? null;
-    try {
-      const pdftext = await import('./pdftext.js');
-      const info = await pdftext.prepareImport(pdf);
-      pageCount = info.pageCount;
-      thumb = info.thumb;
-      // Si el PDF trae texto propio se toma el nuevo; si es escaneo se conserva el del OCR.
-      if (info.text.replace(/\s/g, '').length >= Math.max(16, info.pageCount * 8)) textoOcr = info.text;
-    } catch {
-      /* sin miniatura nueva */
-    }
-    const cambios = { pdf, size: pdf.size, pageCount, previews: null, textoOcr };
-    if (thumb) cambios.thumb = thumb;
-    if (inCloud(doc)) {
-      const { remotePath, thumbPath } = await cloud.uploadNewVersion(doc, { pdf, thumb, pageCount, textoOcr });
-      Object.assign(cambios, { remotePath, thumbPath });
-    }
-    const updated = await updateDoc(doc.id, cambios);
+    const updated = await replaceDocPdf(doc, await edit.composePages(org.sources, orgComposition()));
     closeOrganize(true);
     renderLibrary();
     processQueue();
@@ -1618,6 +1737,7 @@ function organizeKeys(event) {
   else if (mod && event.key.toLowerCase() === 'a') setSelection(org.pages.map((_, i) => i));
   else if ((event.key === 'Delete' || event.key === 'Backspace') && org.selected.size) deleteSelected();
   else if (event.key === 'Escape' && org.selected.size) setSelection([]);
+  else if (event.key.toLowerCase() === 'e' && !mod && org.selected.size) extractSelected();
   else if (event.key.toLowerCase() === 'r' && !mod && org.selected.size) rotateSelected(event.shiftKey ? -90 : 90);
   else return;
   event.preventDefault();
@@ -1646,6 +1766,7 @@ function toolsMenu() {
   }
   opciones.push(
     { label: 'Organizar páginas', run: () => openOrganize(doc) },
+    { label: 'Extraer páginas', run: () => openOrganize(doc, { mode: 'extract' }) },
     { label: 'Exportar a imagen', run: () => exportToImages(doc) },
     { label: 'Convertir a Word / Excel / PPT', run: () => convertMenu(doc) },
     { label: 'Renombrar', run: renameCurrent },
@@ -3164,7 +3285,7 @@ async function importBatch(items) {
     toast('Necesitas conexión a internet para crear las carpetas de la importación.');
     return;
   }
-  const lineas = [`Se importarán ${plural(tasks.length, 'documento', 'documentos')}:`];
+  const lineas = [`Se ${tasks.length === 1 ? 'importará' : 'importarán'} ${plural(tasks.length, 'documento', 'documentos')}:`];
   if (pdfItems.length) lineas.push(`• ${plural(pdfItems.length, 'PDF', 'PDF')}`);
   if (imageItems.length) {
     lineas.push(
