@@ -428,6 +428,7 @@ function renderLibSide() {
   nodes.push(boton({ icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() }));
   nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
+  nodes.push(boton({ icon: 'doc', label: 'Convertir PDF', run: () => pickDocument('Convertir…', convertMenu) }));
   nodes.push(boton({ icon: 'pages', label: 'Organizar páginas', run: () => pickDocument('Organizar páginas de…', openOrganize) }));
   nodes.push(
     boton({ icon: 'extract', label: 'Extraer páginas', run: () => pickDocument('Extraer páginas de…', (d) => openOrganize(d, { mode: 'extract' })) }),
@@ -942,6 +943,9 @@ async function processQueue() {
       renderLibrary();
       try {
         const { remotePath, thumbPath } = await cloud.uploadDocument(doc);
+        // Si el OCR terminó mientras se subía, su texto aún no llegó a la nube.
+        const ahora = state.docs.find((d) => d.id === id);
+        if (ahora && ahora.textoOcr !== doc.textoOcr) await cloud.setOcr(id, ahora.textoOcr, ahora.estadoOcr).catch(() => {});
         await updateDoc(id, { sync: 'subido', remotePath, thumbPath, syncError: null });
       } catch (error) {
         await updateDoc(id, { sync: 'error', syncError: error.message });
@@ -1767,8 +1771,7 @@ function toolsMenu() {
   opciones.push(
     { label: 'Organizar páginas', run: () => openOrganize(doc) },
     { label: 'Extraer páginas', run: () => openOrganize(doc, { mode: 'extract' }) },
-    { label: 'Exportar a imagen', run: () => exportToImages(doc) },
-    { label: 'Convertir a Word / Excel / PPT', run: () => convertMenu(doc) },
+    { label: 'Convertir a… (Word, ePub, HTML, RTF, texto, imágenes)', run: () => convertMenu(doc) },
     { label: 'Renombrar', run: renameCurrent },
   );
   chooseAction(doc.name, opciones);
@@ -2143,6 +2146,11 @@ function convertMenu(doc) {
     { label: 'Word (.docx) · texto editable', run: () => toWord(doc) },
     { label: 'Excel (.xlsx) · texto por filas', run: () => toExcel(doc) },
     { label: 'PowerPoint (.pptx) · páginas como imagen', run: () => toPptx(doc) },
+    { label: 'ePub (.epub) · libro electrónico', run: () => convertReading(doc, 'epub') },
+    { label: 'HTML (.html) · página web', run: () => convertReading(doc, 'html') },
+    { label: 'RTF (.rtf) · texto con formato', run: () => convertReading(doc, 'rtf') },
+    { label: 'Texto (.txt) · solo texto', run: () => convertReading(doc, 'txt') },
+    { label: 'Imágenes · un archivo por página (PNG o JPEG)', run: () => exportToImages(doc) },
   ];
   if (signedIn()) {
     opciones.push(
@@ -2152,6 +2160,115 @@ function convertMenu(doc) {
     );
   }
   chooseAction(`Convertir «${doc.name}»`, opciones);
+}
+
+// ---------------------------------------------------------------------------
+// Convertir a formatos de lectura: ePub, HTML, RTF y texto
+// ---------------------------------------------------------------------------
+
+const READING_FORMATS = {
+  epub: { label: 'ePub', ext: 'epub', images: true },
+  html: { label: 'HTML', ext: 'html', images: true },
+  rtf: { label: 'RTF', ext: 'rtf', images: false },
+  txt: { label: 'texto', ext: 'txt', images: false },
+};
+
+/** Texto del PDF separado por página (extractLines separa páginas con una línea vacía). */
+function splitPages(lineas) {
+  const pages = [[]];
+  for (const linea of lineas) {
+    if (linea === '') pages.push([]);
+    else pages.at(-1).push(linea);
+  }
+  return pages;
+}
+
+async function convertReading(doc, formato) {
+  const fmt = READING_FORMATS[formato];
+  const head = `Convirtiendo a ${fmt.label}…`;
+  busy(head, { fraction: 0 });
+  try {
+    const blob = await pdfBlobOf(doc);
+    const pdftext = await import('./pdftext.js');
+    const porPagina = splitPages(
+      await pdftext.extractLines(blob, (n, t) => busy(head, { fraction: (n / t) * 0.3, sub: `Leyendo página ${n} de ${t}` })),
+    );
+    const caracteres = porPagina.flat().join('').replace(/\s/g, '').length;
+    const conTexto = caracteres >= Math.max(16, porPagina.length * 8);
+
+    // Escaneo sin texto: se usa el del OCR (o se ofrece reconocerlo).
+    let ocr = conTexto ? null : doc.textoOcr?.trim() || null;
+    if (!conTexto && !ocr) {
+      busy(null);
+      if (signedIn() && confirm(`«${doc.name}» es un escaneo sin texto. ¿Reconocer el texto con OCR antes de convertir?`)) {
+        busy('Reconociendo texto…');
+        const res = await ocrDocument(blob, (hecho, total) =>
+          busy('Reconociendo texto…', { fraction: hecho / total, sub: `${hecho} de ${total} páginas` }),
+        );
+        ocr = (res.texto || '').trim() || null;
+        if (ocr) {
+          await updateDoc(doc.id, { textoOcr: ocr, estadoOcr: 'completado' });
+          if (inCloud(doc)) await cloud.setOcr(doc.id, ocr, 'completado');
+          renderLibrary();
+        }
+      }
+      if (!ocr && !fmt.images) {
+        toast(`Este PDF no tiene texto (es un escaneo). Para ${fmt.label} necesita OCR${signedIn() ? '' : ': inicia sesión para usarlo'}.`);
+        return;
+      }
+      busy(head, { fraction: 0.3 });
+    }
+
+    // ePub y HTML: con texto propio se elige si incluir la imagen de cada página;
+    // un escaneo siempre lleva las imágenes (es lo que se ve del documento).
+    let conImagenes = false;
+    if (fmt.images) {
+      if (conTexto) {
+        busy(null);
+        conImagenes = await new Promise((resolve) =>
+          chooseAction(`Convertir a ${fmt.label}`, [
+            { label: 'Solo texto (adaptable y liviano)', run: () => resolve(false) },
+            { label: 'Texto e imagen de cada página', run: () => resolve(true) },
+          ], () => resolve(null)),
+        );
+        if (conImagenes == null) return;
+        busy(head, { fraction: 0.3 });
+      } else conImagenes = true;
+    }
+
+    let pages = conTexto ? porPagina.map((lines) => ({ lines })) : porPagina.map(() => ({ lines: [] }));
+    if (conImagenes) {
+      const imagenes = await pdftext.renderPdfPages(blob, 1400, (n, t) =>
+        busy(head, { fraction: 0.3 + (n / t) * 0.5, sub: `Imagen de la página ${n} de ${t}` }),
+      );
+      pages = pages.map((p, i) => ({ ...p, image: imagenes[i] }));
+    }
+    if (!conTexto) {
+      if (!conImagenes) pages = [];
+      if (ocr) pages.push({ heading: 'Texto reconocido', lines: ocr.split(/\r?\n/) });
+    }
+
+    busy(head, { fraction: 0.85, sub: 'Armando el archivo…' });
+    const formats = await import('./formats.js');
+    const title = doc.name;
+    const out =
+      formato === 'epub'
+        ? await formats.toEpub(pages, { title })
+        : formato === 'html'
+          ? await formats.toHtml(pages, { title })
+          : formato === 'rtf'
+            ? formats.toRtf(pages, title)
+            : formats.toTxt(pages);
+    await shareOrDownload(new File([out], `${sanitizeName(doc.name)}.${fmt.ext}`, { type: out.type }));
+    toast(
+      `${fmt.label === 'texto' ? 'Texto (.txt)' : fmt.label} listo.` +
+        (ocr ? ' El texto viene del OCR: revisa nombres y números.' : ''),
+    );
+  } catch (error) {
+    toast(`No se pudo convertir: ${error.message}`);
+  } finally {
+    busy(null);
+  }
 }
 
 async function toHiFi(doc, formato) {
