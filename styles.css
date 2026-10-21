@@ -355,6 +355,30 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .doc-row.selected-row { background: var(--accent-soft); }
 .comb-import { width: 100%; }
 
+/* ---------- Sellos dinámicos ---------- */
+.scroll.sl-body { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 32px; padding: 16px; max-width: 980px; width: 100%; margin: 0 auto; box-sizing: border-box; align-content: start; }
+.sl-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sl-col .section-title { margin: 8px 0 0; }
+.sl-row { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 10px; font-size: 15px; }
+.sl-input { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: 0.5px solid var(--separator); background: var(--surface); color: var(--text); font: inherit; font-size: 15px; }
+.sl-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.sl-styles, .sl-colors { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sl-style { width: 46px; height: 36px; display: grid; place-items: center; border-radius: 8px; color: var(--text-2); }
+.sl-style svg { width: 38px; height: 26px; overflow: visible; }
+.sl-style.active { background: var(--accent-soft); color: var(--accent); }
+.sl-orient { margin: 0; }
+.sl-preview { display: grid; place-items: center; height: 170px; padding: 16px; border-radius: var(--radius); background: var(--surface-2); }
+.sl-preview svg { width: 100%; height: 100%; overflow: visible; }
+.ann-seals { display: flex; flex-wrap: wrap; gap: 6px; flex: none; max-width: 100%; }
+.ann-seal-chip { width: 96px; height: 40px; padding: 4px; border-radius: 8px; background: #fff; border: 2px solid transparent; display: grid; place-items: center; color: #333; font-size: 11px; font-weight: 600; }
+.ann-seal-chip svg { width: 100%; height: 100%; }
+.ann-seal-chip.active { border-color: var(--accent); }
+.ann-seal-chip.folio { background: var(--surface-2); color: var(--text); }
+.ann-seal { pointer-events: auto; }
+.ann-seal svg { width: 100%; height: 100%; display: block; overflow: visible; pointer-events: none; }
+@media (max-width: 720px) { .scroll.sl-body { grid-template-columns: 1fr; } .sl-row { grid-template-columns: 96px 1fr; } }
+.ann-side .ann-seals { padding: 4px 12px; }
+
 /* ---------- Comparar PDF ---------- */
 .scroll.cmp-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; max-width: 1100px; width: 100%; margin: 0 auto; box-sizing: border-box; }
 .cmp-body > * { flex-shrink: 0; }

@@ -205,6 +205,42 @@
     </div>
   </section>
 
+  <!-- Sello dinámico personalizado -->
+  <section id="seal" class="screen sheet" hidden>
+    <header class="bar">
+      <button id="slCancel" class="text-btn" type="button">Cancelar</button>
+      <h1 id="slTitle">Crear sello dinámico</h1>
+      <button id="slSave" class="text-btn strong" type="button">Guardar</button>
+    </header>
+    <div class="scroll sl-body">
+      <div class="sl-col">
+        <p class="section-title">Estilo</p>
+        <div class="sl-row"><span>Estilo</span><div id="slStyles" class="sl-styles"></div></div>
+        <div class="sl-row"><span>Color</span><div id="slColors" class="sl-colors"></div></div>
+        <label class="pr-check"><input id="slOutline" type="checkbox"> Conservar solo el texto y los bordes</label>
+        <p class="section-title">Contenido</p>
+        <label class="sl-row"><span>Texto</span><input id="slText" class="sl-input" maxlength="60" autocomplete="off"></label>
+        <label class="sl-row"><span>Fecha</span><select id="slDate" class="sl-input"></select></label>
+        <label class="sl-row"><span>Identidad</span><select id="slId" class="sl-input"></select></label>
+        <p class="section-title">Fuente</p>
+        <label class="sl-row"><span>Fuente</span><select id="slFont" class="sl-input"></select></label>
+        <label class="sl-row"><span>Tamaño</span><select id="slSize" class="sl-input"></select></label>
+        <div class="sl-row"><span>Orientación</span><div id="slOrient" class="segmented light sl-orient"><button type="button" data-v="0">Horizontal</button><button type="button" data-v="1">Vertical</button></div></div>
+      </div>
+      <div class="sl-col">
+        <p class="section-title">Sello</p>
+        <div id="slPreview" class="sl-preview"></div>
+        <p id="slPreviewHint" class="hint center"></p>
+        <label class="sl-row"><span>Categoría</span><input id="slCat" class="sl-input" list="slCats" placeholder="Ej.: Contabilidad" autocomplete="off"><datalist id="slCats"></datalist></label>
+        <label class="sl-row"><span>Nombre</span><input id="slName" class="sl-input" maxlength="40" autocomplete="off"></label>
+        <label class="sl-row"><span>Anchura (mm)</span><input id="slW" class="sl-input" type="number" min="10" max="200" step="0.5"></label>
+        <label class="sl-row"><span>Altura (mm)</span><input id="slH" class="sl-input" type="number" min="5" max="120" step="0.5"></label>
+        <button id="slFit" class="btn" type="button">Ajustar el ancho al texto</button>
+        <button id="slDelete" class="btn danger-text" type="button" hidden>Eliminar sello</button>
+      </div>
+    </div>
+  </section>
+
   <!-- Comparar PDF -->
   <section id="compare" class="screen sheet" hidden>
     <header class="bar">

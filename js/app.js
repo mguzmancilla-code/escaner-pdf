@@ -16,6 +16,7 @@ import {
 } from './imaging.js';
 import { PAGE_SIZES, buildPdf } from './pdf.js';
 import { cvReady, detectDocument, loadCV } from './opencv.js';
+import { COLORES, ESTILOS, FECHAS, FUENTES, IDENTIDADES, MM, TAMANOS, disenoSello, lineasSello, nuevoSello, sellosIniciales, svgSello } from './sellos.js';
 
 const QUALITIES = {
   maximum: { label: 'Máxima', maxSide: Infinity, jpeg: 0.95, hint: 'Resolución original sin reducir. Archivos más grandes.' },
@@ -99,6 +100,8 @@ for (const id of [
   'textx', 'txClose', 'txCopy', 'txHint', 'txCamera', 'txImages', 'txPaste', 'txThumbs', 'txText', 'txCount',
   'txTxt', 'txDocx', 'txClear', 'txCameraInput', 'txImagesInput',
   'compare', 'cmpClose', 'cmpMark', 'cmpA', 'cmpAName', 'cmpB', 'cmpBName', 'cmpSwap', 'cmpRun', 'cmpTabs', 'cmpResult', 'cmpInput',
+  'seal', 'slCancel', 'slTitle', 'slSave', 'slStyles', 'slColors', 'slOutline', 'slText', 'slDate', 'slId', 'slFont', 'slSize', 'slOrient',
+  'slPreview', 'slPreviewHint', 'slCat', 'slCats', 'slName', 'slW', 'slH', 'slFit', 'slDelete',
   'protect', 'prClose', 'prTitle', 'prPass', 'prPass2', 'prShow', 'prHint', 'prPrint', 'prCopy', 'prEdit', 'prPermsHint', 'prDo',
 ]) el[id] = $(id);
 
@@ -438,6 +441,7 @@ function renderLibSide() {
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
   nodes.push(boton({ icon: 'doc', label: 'Convertir PDF', run: () => pickDocument('Convertir…', convertMenu) }));
   nodes.push(boton({ icon: 'compare', label: 'Comparar PDF', run: () => openCompare() }));
+  nodes.push(boton({ icon: 'stamp', label: 'Mis sellos', run: sealsMenu }));
   nodes.push(boton({ icon: 'lock', label: 'Proteger PDF', run: () => pickDocument('Proteger con contraseña…', openProtect) }));
   nodes.push(boton({ icon: 'pages', label: 'Organizar páginas', run: () => pickDocument('Organizar páginas de…', openOrganize) }));
   nodes.push(
@@ -2484,6 +2488,199 @@ async function markCompare() {
 }
 
 // ---------------------------------------------------------------------------
+// Sellos dinámicos personalizados (diseñador y biblioteca de sellos)
+// ---------------------------------------------------------------------------
+
+/** Sellos guardados en este navegador (la primera vez, unos de ejemplo). */
+function getSellos() {
+  let lista = storage.get('sellos', null);
+  if (!Array.isArray(lista)) {
+    lista = sellosIniciales();
+    storage.set('sellos', lista);
+  }
+  return lista;
+}
+
+/** Datos para la parte dinámica del sello: nombre del perfil y correo. */
+function datosSello() {
+  const u = state.user;
+  return { nombre: u?.user_metadata?.full_name || u?.user_metadata?.name || '', correo: u?.email || '' };
+}
+
+let sl = null; // { s: sello en edición, nuevo, anchoManual, onSave }
+
+function openSealEditor(sello = null, onSave = null) {
+  sl = { s: structuredClone(sello ?? nuevoSello()), nuevo: !sello, anchoManual: Boolean(sello), onSave };
+  el.slTitle.textContent = sl.nuevo ? 'Crear sello dinámico' : 'Editar sello';
+  el.slDelete.hidden = sl.nuevo;
+  fillSealForm();
+  el.seal.hidden = false;
+  setTimeout(() => el.slText.select(), 50);
+}
+
+function closeSealEditor() {
+  sl = null;
+  el.seal.hidden = true;
+}
+
+function fillSealForm() {
+  const s = sl.s;
+  const opciones = (select, lista, valor) => {
+    select.replaceChildren(
+      ...lista.map((o) => {
+        const opt = document.createElement('option');
+        opt.value = o.id ?? o;
+        opt.textContent = o.label ?? (o === 'auto' ? 'Automático' : `${o} pt`);
+        return opt;
+      }),
+    );
+    select.value = String(valor);
+  };
+  opciones(el.slDate, FECHAS, s.fecha);
+  opciones(el.slId, IDENTIDADES, s.identidad);
+  opciones(el.slFont, FUENTES, s.fuente);
+  opciones(el.slSize, TAMANOS, s.tamano);
+  el.slText.value = s.texto;
+  el.slOutline.checked = s.soloBordes;
+  el.slCat.value = s.categoria;
+  el.slName.value = s.nombre;
+  el.slW.value = s.anchoMm;
+  el.slH.value = s.altoMm;
+  el.slCats.replaceChildren(
+    ...[...new Set(getSellos().map((x) => x.categoria).filter(Boolean))].map((c) => Object.assign(document.createElement('option'), { value: c })),
+  );
+  renderSealForm();
+}
+
+function renderSealForm() {
+  const s = sl.s;
+  el.slStyles.replaceChildren(
+    ...ESTILOS.map((e) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `sl-style${s.estilo === e.id ? ' active' : ''}`;
+      b.title = e.label;
+      const muestra = { ...s, estilo: e.id, texto: 'A', fecha: 'ninguna', identidad: 'ninguna', anchoMm: e.id === 'texto' ? 8 : 12, altoMm: 8, vertical: false, tamano: 'auto', color: 'currentColor', soloBordes: true };
+      b.innerHTML = svgSello(muestra, ['A']);
+      b.addEventListener('click', () => {
+        s.estilo = e.id;
+        if (!sl.anchoManual) {
+          s.anchoMm = anchoAjustado(s); // la punta de la flecha o el óvalo ocupan espacio
+          el.slW.value = s.anchoMm;
+        }
+        renderSealForm();
+      });
+      return b;
+    }),
+  );
+  const chips = COLORES.map((c) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `ann-chip${s.color === c ? ' active' : ''}`;
+    b.style.background = c;
+    b.addEventListener('click', () => {
+      s.color = c;
+      renderSealForm();
+    });
+    return b;
+  });
+  const custom = document.createElement('input');
+  custom.type = 'color';
+  custom.className = 'ann-color';
+  custom.value = s.color;
+  custom.title = 'Otro color';
+  custom.addEventListener('input', () => {
+    s.color = custom.value;
+    renderSealPreview();
+  });
+  el.slColors.replaceChildren(...chips, custom);
+  el.slOrient.querySelectorAll('button').forEach((b) => b.classList.toggle('active', (b.dataset.v === '1') === s.vertical));
+  renderSealPreview();
+}
+
+function renderSealPreview() {
+  const s = sl.s;
+  el.slPreview.innerHTML = svgSello(s, lineasSello(s, datosSello()));
+  const id = datosSello();
+  el.slPreviewHint.textContent =
+    s.identidad !== 'ninguna' && !id.nombre && !id.correo
+      ? 'Para la identidad, inicia sesión (y pon tu nombre en tu perfil).'
+      : s.fecha !== 'ninguna' || s.identidad !== 'ninguna'
+        ? 'Vista previa con los datos de ahora: la fecha y la identidad se completan al timbrar.'
+        : '';
+}
+
+/** Ancho (mm) para que el texto principal use todo el alto disponible. */
+function anchoAjustado(s) {
+  const lineas = lineasSello(s, datosSello());
+  for (let mm = 12; mm <= 200; mm += 0.5) {
+    const d = disenoSello(s, lineas, mm * MM, s.altoMm * MM);
+    const alto = (d.util.y1 - d.util.y0) * (lineas.length > 1 ? 0.64 : 1) * 0.86;
+    if (d.tamanos.every((t, i) => i > 0 || t >= alto - 0.01) || mm === 200) return mm;
+  }
+  return 200;
+}
+
+function readSealForm(event) {
+  const s = sl.s;
+  s.texto = el.slText.value;
+  s.soloBordes = el.slOutline.checked;
+  s.fecha = el.slDate.value;
+  s.identidad = el.slId.value;
+  s.fuente = el.slFont.value;
+  s.tamano = el.slSize.value === 'auto' ? 'auto' : Number(el.slSize.value);
+  s.categoria = el.slCat.value.trim();
+  s.nombre = el.slName.value;
+  const w = Number(el.slW.value);
+  const h = Number(el.slH.value);
+  if (w >= 10 && w <= 200) s.anchoMm = w;
+  if (h >= 5 && h <= 120) s.altoMm = h;
+  if (event?.target === el.slW) sl.anchoManual = true;
+  // Mientras no se cambie el ancho a mano, se ajusta al texto.
+  if (!sl.anchoManual && [el.slText, el.slDate, el.slId, el.slFont, el.slH, el.slSize].includes(event?.target)) {
+    s.anchoMm = anchoAjustado(s);
+    el.slW.value = s.anchoMm;
+  }
+  if (sl.nuevo && event?.target === el.slText && (!s.nombre || s.nombre === 'Sello nuevo' || s.nombre === sl.ultimoNombreAuto)) {
+    s.nombre = sl.ultimoNombreAuto = s.texto.trim().slice(0, 40) || 'Sello nuevo';
+    el.slName.value = s.nombre;
+  }
+  renderSealPreview();
+}
+
+function saveSeal() {
+  const s = sl.s;
+  if (!s.texto.trim()) return toast('Escribe el texto del sello.');
+  s.texto = s.texto.trim();
+  s.nombre = s.nombre.trim() || s.texto;
+  const lista = getSellos().filter((x) => x.id !== s.id);
+  const i = getSellos().findIndex((x) => x.id === s.id);
+  lista.splice(i < 0 ? 0 : i, 0, s);
+  storage.set('sellos', lista);
+  const cb = sl.onSave;
+  closeSealEditor();
+  toast(`Sello «${s.nombre}» guardado.`);
+  cb?.(s);
+}
+
+function deleteSeal() {
+  if (!confirm(`¿Eliminar el sello «${sl.s.nombre}»?`)) return;
+  storage.set('sellos', getSellos().filter((x) => x.id !== sl.s.id));
+  const cb = sl.onSave;
+  closeSealEditor();
+  cb?.(null);
+}
+
+/** Biblioteca de sellos: elegir uno para editarlo o crear uno nuevo. */
+function sealsMenu() {
+  const lista = getSellos();
+  chooseAction('Mis sellos', [
+    { label: '＋ Crear sello dinámico', run: () => openSealEditor() },
+    ...lista.map((s) => ({ label: `${s.categoria ? `${s.categoria} · ` : ''}${s.nombre}`, run: () => openSealEditor(s) })),
+  ]);
+}
+
+// ---------------------------------------------------------------------------
 // Compartir o descargar un archivo generado (computador: descarga; iPhone: compartir)
 // ---------------------------------------------------------------------------
 
@@ -2787,7 +2984,7 @@ const ANN_TOOLS = [
   { id: 'text', icon: 'textT', label: 'Texto' },
   { id: 'redact', icon: 'redactbox', label: 'Tapar' },
   { id: 'draw', icon: 'signature', label: 'Firmar' },
-  { id: 'stamp', icon: 'stamp', label: 'Timbre' },
+  { id: 'stamp', icon: 'stamp', label: 'Sello' },
 ];
 const ANN_COMMENT_TYPES = new Set(['note', 'highlight', 'underline', 'strike', 'pen', 'rect']);
 const ANN_LABELS = { note: 'Nota', highlight: 'Resaltado', underline: 'Subrayado', strike: 'Tachado', pen: 'Lápiz', rect: 'Recuadro' };
@@ -2803,7 +3000,7 @@ const ANN_HINTS = {
   text: 'Toca donde quieras escribir.',
   redact: 'Arrastra para tapar un área (recuadro opaco).',
   draw: 'Arrastra para firmar o dibujar a mano alzada. También puedes importar una firma.',
-  stamp: 'Toca donde quieras poner el timbre con tus datos y un folio.',
+  stamp: 'Elige un sello y toca donde quieras timbrar. La fecha y tu nombre se completan en ese momento.',
 };
 const ANN_THICKNESS = [['Fino', 0.002], ['Medio', 0.004], ['Grueso', 0.008]];
 
@@ -3000,6 +3197,51 @@ function renderAnnTools() {
       grosores.append(b);
     }
     extras.push(grosores);
+  }
+  // Sellos: elegir cuál poner (o crear uno nuevo).
+  if (ann.tool === 'stamp') {
+    const cont = document.createElement('div');
+    cont.className = 'ann-seals';
+    const actual = ann.sealId ?? getSellos()[0]?.id ?? 'folio';
+    for (const s of getSellos()) {
+      const b = document.createElement('button');
+      b.className = `ann-seal-chip${actual === s.id ? ' active' : ''}`;
+      b.title = s.categoria ? `${s.categoria} · ${s.nombre}` : s.nombre;
+      b.innerHTML = svgSello({ ...s, vertical: false }, lineasSello(s, datosSello()));
+      b.addEventListener('click', () => {
+        ann.sealId = s.id;
+        renderAnnTools();
+      });
+      b.addEventListener('dblclick', () => openSealEditor(s, () => renderAnnTools()));
+      cont.append(b);
+    }
+    const folio = document.createElement('button');
+    folio.className = `ann-seal-chip folio${actual === 'folio' ? ' active' : ''}`;
+    folio.textContent = 'Timbre con folio';
+    folio.addEventListener('click', () => {
+      ann.sealId = 'folio';
+      renderAnnTools();
+    });
+    cont.append(folio);
+    extras.push(cont);
+    const nuevo = document.createElement('button');
+    nuevo.className = 'ann-tool';
+    nuevo.innerHTML = `${icon('stamp')}<span>Nuevo sello</span>`;
+    nuevo.addEventListener('click', () =>
+      openSealEditor(null, (s) => {
+        if (s) ann.sealId = s.id;
+        renderAnnTools();
+      }),
+    );
+    extras.push(nuevo);
+    const sel = getSellos().find((s) => s.id === actual);
+    if (sel) {
+      const ed = document.createElement('button');
+      ed.className = 'ann-tool';
+      ed.innerHTML = `${icon('pencil')}<span>Editar sello</span>`;
+      ed.addEventListener('click', () => openSealEditor(sel, () => renderAnnTools()));
+      extras.push(ed);
+    }
   }
   // Importar una imagen de firma (p. ej. PNG con fondo transparente) y reutilizar guardadas.
   if (ann.tool === 'draw') {
@@ -3252,6 +3494,14 @@ function renderAnnItems(layer, pageIndex, extra = null) {
       node.style.width = `${it.wr * 100}%`;
       node.style.height = `${it.hr * 100}%`;
       node.innerHTML = `<img alt="Firma" src="${it.dataUrl}">`;
+    } else if (it.type === 'seal') {
+      node = document.createElement('div');
+      node.className = 'ann-item ann-seal';
+      node.style.left = `${it.xr * 100}%`;
+      node.style.top = `${it.yr * 100}%`;
+      node.style.width = `${it.wr * 100}%`;
+      node.style.height = `${it.hr * 100}%`;
+      node.innerHTML = svgSello(it.sello, it.lines);
     } else if (it.type === 'stamp') {
       node = document.createElement('div');
       node.className = 'ann-item ann-stamp';
@@ -3367,6 +3617,29 @@ function annPointerDown(event, pageIndex, wrap) {
       ann.items.push({ id: ann.nextId++, page: pageIndex, type: 'text', xr: p.xr, yr: p.yr, size: ann.textSize, color: ann.color, text: text.trim() });
       renderAnnPages();
     }
+    return;
+  }
+  const sello = ann.tool === 'stamp' && getSellos().find((s) => s.id === (ann.sealId ?? getSellos()[0]?.id));
+  if (sello) {
+    // Sello dinámico: la fecha y la identidad se fijan ahora, al timbrar.
+    const page = ann.pages[pageIndex];
+    const [wPt, hPt] = sello.vertical ? [sello.altoMm * MM, sello.anchoMm * MM] : [sello.anchoMm * MM, sello.altoMm * MM];
+    const wr = Math.min(0.95, wPt / page.width);
+    const hr = Math.min(0.95, hPt / page.height);
+    pushAnnHistory();
+    ann.items.push({
+      id: ann.nextId++,
+      page: pageIndex,
+      type: 'seal',
+      xr: clamp01(Math.min(p.xr - wr / 2, 1 - wr)),
+      yr: clamp01(Math.min(p.yr - hr / 2, 1 - hr)),
+      wr,
+      hr,
+      sello: structuredClone(sello),
+      lines: lineasSello(sello, datosSello()),
+    });
+    renderAnnTools();
+    renderAnnPages();
     return;
   }
   if (ann.tool === 'stamp') {
@@ -4784,6 +5057,26 @@ function setup() {
     el.busyStop.hidden = true;
     el.busySub.textContent = 'Deteniendo al terminar el documento actual…';
   });
+  // Sellos dinámicos
+  el.slCancel.addEventListener('click', closeSealEditor);
+  el.slSave.addEventListener('click', saveSeal);
+  el.slDelete.addEventListener('click', deleteSeal);
+  for (const c of [el.slText, el.slOutline, el.slDate, el.slId, el.slFont, el.slSize, el.slCat, el.slName, el.slW, el.slH]) {
+    c.addEventListener('input', readSealForm);
+  }
+  el.slOrient.addEventListener('click', (event) => {
+    const b = event.target.closest('button');
+    if (!b || !sl) return;
+    sl.s.vertical = b.dataset.v === '1';
+    renderSealForm();
+  });
+  el.slFit.addEventListener('click', () => {
+    sl.s.anchoMm = anchoAjustado(sl.s);
+    el.slW.value = sl.s.anchoMm;
+    sl.anchoManual = false;
+    renderSealPreview();
+  });
+
   // Comparar PDF
   el.cmpClose.addEventListener('click', closeCompare);
   el.cmpA.addEventListener('click', () => pickCompareSource('a'));

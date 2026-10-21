@@ -278,6 +278,7 @@ export async function applyAnnotations(blob, items, { author = '' } = {}) {
   const doc = await loadDoc(PDFLib, blob);
   const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
   const pages = doc.getPages();
+  const cacheSellos = new Map();
 
   for (const it of items) {
     const page = pages[it.page];
@@ -355,22 +356,26 @@ export async function applyAnnotations(blob, items, { author = '' } = {}) {
         const [lx, ly] = toPdf(vx, vy);
         page.drawText(ln, { x: lx, y: ly, size, font, color, rotate: PDFLib.degrees(rot) });
       });
+    } else if (it.type === 'seal' && it.sello) {
+      const emb = await sealXObject(PDFLib, doc, it.sello, it.lines, cacheSellos);
+      // drawPage gira alrededor de la esquina inferior izquierda del sello «derecho»,
+      // que en la vista es (xr, yr + hr), sea cual sea el giro de la página.
+      const [ax, ay] = toPdf(it.xr, it.yr + it.hr);
+      page.drawPage(emb, {
+        x: ax,
+        y: ay,
+        width: it.wr * (rot === 90 || rot === 270 ? H : W),
+        height: it.hr * (rot === 90 || rot === 270 ? W : H),
+        rotate: PDFLib.degrees(rot),
+      });
     } else if (it.type === 'image' && it.dataUrl) {
       const bytes = Uint8Array.from(atob(it.dataUrl.split(',')[1]), (c) => c.charCodeAt(0));
       const embedded = it.dataUrl.startsWith('data:image/png')
         ? await doc.embedPng(bytes)
         : await doc.embedJpg(bytes);
-      const [x0, y0] = toPdf(it.xr, it.yr);
-      const [x1, y1] = toPdf(it.xr + it.wr, it.yr + it.hr);
-      // Para páginas giradas, drawImage ancla en una esquina y rota; se elige la
-      // esquina correcta según la rotación para que quede donde se ve en pantalla.
-      const anchors = {
-        0: [Math.min(x0, x1), Math.min(y0, y1)],
-        90: [x0, y0],
-        180: [Math.max(x0, x1), Math.max(y0, y1)],
-        270: [x1, y1],
-      };
-      const [ax, ay] = anchors[rot] || anchors[0];
+      // drawImage gira alrededor de la esquina inferior izquierda de la imagen
+      // «derecha», que en la vista es (xr, yr + hr), sea cual sea el giro de la página.
+      const [ax, ay] = toPdf(it.xr, it.yr + it.hr);
       page.drawImage(embedded, {
         x: ax,
         y: ay,
@@ -415,4 +420,64 @@ export async function markChanges(blob, marks, { author = '' } = {}) {
     addComment(PDFLib, doc, page, it, { toPdf, vista: { w: 1, h: 1 }, author });
   }
   return asBlob(await doc.save({ useObjectStreams: false }));
+}
+
+// ---------------------------------------------------------------------------
+// Sellos personalizados: se dibujan como vector en un PDF aparte (una página
+// del tamaño del sello) y se incrustan donde corresponde.
+// ---------------------------------------------------------------------------
+
+const FUENTES_SELLO = {
+  Helvetica: ['HelveticaBold', 'Helvetica'],
+  Times: ['TimesRomanBold', 'TimesRoman'],
+  Courier: ['CourierBold', 'Courier'],
+};
+
+async function sealXObject(PDFLib, doc, s, lineas, cache) {
+  const clave = JSON.stringify([s, lineas]);
+  if (cache.has(clave)) return cache.get(clave);
+  const { disenoSello, contornoSello, MM } = await import('./sellos.js');
+  const w = s.anchoMm * MM;
+  const h = s.altoMm * MM;
+  const sd = await PDFLib.PDFDocument.create();
+  const pg = sd.addPage([w, h]);
+  const color = hexToRgb(PDFLib, s.color);
+  const d = disenoSello(s, lineas, w, h);
+  const camino = contornoSello(s, w, h, d.borde);
+  if (camino) {
+    pg.drawSvgPath(camino, {
+      x: 0,
+      y: h,
+      borderColor: color,
+      borderWidth: d.borde,
+      ...(s.soloBordes ? {} : { color, opacity: 0.12 }),
+      borderOpacity: 1,
+    });
+  }
+  const [negrita, normal] = FUENTES_SELLO[s.fuente] ?? FUENTES_SELLO.Helvetica;
+  const fuentes = [await sd.embedFont(PDFLib.StandardFonts[negrita]), await sd.embedFont(PDFLib.StandardFonts[normal])];
+  const centro = (d.util.x0 + d.util.x1) / 2;
+  const anchoUtil = d.util.x1 - d.util.x0;
+  lineas.forEach((ln, i) => {
+    const f = fuentes[i === 0 ? 0 : 1];
+    const txt = winAnsi(ln);
+    // El ancho real de la fuente manda: nunca se sale del sello.
+    const size = Math.max(3, Math.min(d.tamanos[i], (anchoUtil / Math.max(1, f.widthOfTextAtSize(txt, 1))) * 0.98));
+    const ancho = f.widthOfTextAtSize(txt, size);
+    pg.drawText(txt, { x: centro - ancho / 2, y: h - d.bases[i], size, font: f, color });
+  });
+
+  // Se guarda antes de incrustar: pdf-lib completa fuentes y páginas incrustadas al guardar.
+  let bytes = await sd.save();
+  if (s.vertical) {
+    // Orientación vertical: se gira 90° dentro de una página de h × w.
+    const vd = await PDFLib.PDFDocument.create();
+    const vp = vd.addPage([h, w]);
+    const [interno] = await vd.embedPdf(bytes);
+    vp.drawPage(interno, { x: h, y: 0, width: w, height: h, rotate: PDFLib.degrees(90) });
+    bytes = await vd.save();
+  }
+  const [emb] = await doc.embedPdf(bytes);
+  cache.set(clave, emb);
+  return emb;
 }
