@@ -355,6 +355,38 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .doc-row.selected-row { background: var(--accent-soft); }
 .comb-import { width: 100%; }
 
+/* ---------- Comparar PDF ---------- */
+.scroll.cmp-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; max-width: 1100px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.cmp-body > * { flex-shrink: 0; }
+.cmp-slots { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: stretch; }
+.cmp-slot { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); text-align: left; min-width: 0; }
+.cmp-slot.empty .cmp-name { color: var(--accent); }
+.cmp-label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-2); }
+.cmp-name { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.cmp-swap { align-self: center; width: 40px; height: 40px; border-radius: 50%; background: var(--surface); color: var(--accent); font-size: 20px; box-shadow: var(--shadow); }
+.cmp-summary { margin: 4px 0 0; font-size: 16px; font-weight: 600; }
+.cmp-text { display: flex; flex-direction: column; gap: 10px; }
+.cmp-change { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--radius); background: var(--surface); border-left: 4px solid #f5a524; }
+.cmp-change.agregado { border-left-color: #30a46c; }
+.cmp-change.eliminado { border-left-color: var(--danger); }
+.cmp-change-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-2); }
+.cmp-badge { font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.cmp-change del { color: var(--danger); background: rgba(229, 51, 42, .1); border-radius: 4px; padding: 2px 6px; text-decoration-thickness: 1.5px; overflow-wrap: anywhere; }
+.cmp-change ins { color: #1f8a52; background: rgba(48, 164, 108, .12); border-radius: 4px; padding: 2px 6px; text-decoration: none; overflow-wrap: anywhere; }
+.cmp-visual { display: flex; flex-direction: column; gap: 14px; }
+.cmp-page-card { padding: 12px; border-radius: var(--radius); background: var(--surface); }
+.cmp-page-card:not(.changed) { opacity: .75; }
+.cmp-page-title { margin: 0 0 10px; font-weight: 600; }
+.cmp-page-card.changed .cmp-page-title { color: var(--danger); }
+.cmp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cmp-fig { margin: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; min-width: 0; }
+.cmp-fig figcaption { font-size: 12px; color: var(--text-2); }
+.cmp-img { position: relative; width: 100%; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.2); }
+.cmp-img img { display: block; width: 100%; height: auto; }
+.cmp-img.missing { display: grid; place-items: center; aspect-ratio: 3 / 4; color: var(--text-2); background: var(--surface-2); }
+.cmp-mark { position: absolute; border: 2px solid #e5332a; background: rgba(229, 51, 42, .14); border-radius: 2px; box-sizing: border-box; }
+@media (max-width: 560px) { .cmp-slots { grid-template-columns: 1fr; } .cmp-swap { justify-self: center; } }
+
 /* ---------- Proteger PDF ---------- */
 .pr-body { display: flex; flex-direction: column; gap: 10px; padding: 20px 16px 32px; max-width: 520px; width: 100%; margin: 0 auto; }
 .pr-body > *, .tx-body > * { flex-shrink: 0; } /* en una columna con scroll, los grupos no deben encogerse */

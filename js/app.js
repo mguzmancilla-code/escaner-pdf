@@ -62,6 +62,7 @@ const ICONS = {
   redactbox: '<rect x="4" y="6" width="16" height="12" rx="1" fill="currentColor"/>',
   signature: '<path d="M4 17c3 0 3-10 6-10s0 10 3 10 2-6 4-6 2 2 3 2"/>',
   stamp: '<rect x="5" y="14" width="14" height="6" rx="1"/><path d="M12 14V9M9 4h6a2 2 0 0 1 2 2c0 2-2 2-2 3H9c0-1-2-1-2-3a2 2 0 0 1 2-2z"/>',
+  compare: '<rect x="3" y="4" width="7.5" height="16" rx="1.2"/><rect x="13.5" y="4" width="7.5" height="16" rx="1.2"/><path d="M5.5 9h2.5M5.5 12h2.5M16 9h2.5M16 12h2.5M16 15h2.5"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8-4.2-4.1 5.9-.9z"/>',
   sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
@@ -97,6 +98,7 @@ for (const id of [
   'cameraInput', 'imagesInput', 'pdfInput', 'folderInput', 'mixedInput',
   'textx', 'txClose', 'txCopy', 'txHint', 'txCamera', 'txImages', 'txPaste', 'txThumbs', 'txText', 'txCount',
   'txTxt', 'txDocx', 'txClear', 'txCameraInput', 'txImagesInput',
+  'compare', 'cmpClose', 'cmpMark', 'cmpA', 'cmpAName', 'cmpB', 'cmpBName', 'cmpSwap', 'cmpRun', 'cmpTabs', 'cmpResult', 'cmpInput',
   'protect', 'prClose', 'prTitle', 'prPass', 'prPass2', 'prShow', 'prHint', 'prPrint', 'prCopy', 'prEdit', 'prPermsHint', 'prDo',
 ]) el[id] = $(id);
 
@@ -435,6 +437,7 @@ function renderLibSide() {
   nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
   nodes.push(boton({ icon: 'doc', label: 'Convertir PDF', run: () => pickDocument('Convertir…', convertMenu) }));
+  nodes.push(boton({ icon: 'compare', label: 'Comparar PDF', run: () => openCompare() }));
   nodes.push(boton({ icon: 'lock', label: 'Proteger PDF', run: () => pickDocument('Proteger con contraseña…', openProtect) }));
   nodes.push(boton({ icon: 'pages', label: 'Organizar páginas', run: () => pickDocument('Organizar páginas de…', openOrganize) }));
   nodes.push(
@@ -1780,6 +1783,7 @@ function toolsMenu() {
     { label: 'Extraer páginas', run: () => openOrganize(doc, { mode: 'extract' }) },
     { label: 'Convertir a… (Word, ePub, HTML, RTF, texto, imágenes)', run: () => convertMenu(doc) },
     { label: 'Proteger con contraseña', run: () => openProtect(doc) },
+    { label: 'Comparar con otro PDF…', run: () => openCompare(doc) },
     { label: 'Renombrar', run: renameCurrent },
   );
   chooseAction(doc.name, opciones);
@@ -2169,6 +2173,311 @@ async function runProtect() {
     toast('PDF protegido listo. Guarda bien la contraseña: si se olvida, no se puede recuperar.');
   } catch (error) {
     toast(`No se pudo proteger: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Herramienta: Comparar PDF
+// ---------------------------------------------------------------------------
+
+let cmp = null; // { a, b, texto, visual, tab, pendiente }  (a/b: { name, doc?, blob? })
+
+function openCompare(docA = null) {
+  cmp = { a: docA ? { name: docA.name, doc: docA } : null, b: null, texto: null, visual: null, tab: 'texto' };
+  renderCompare();
+  el.compare.hidden = false;
+  if (docA) pickCompareSource('b');
+}
+
+function closeCompare() {
+  cmp?.visual?.forEach((p) => {
+    URL.revokeObjectURL(p.urlA);
+    URL.revokeObjectURL(p.urlB);
+  });
+  cmp = null;
+  el.compare.hidden = true;
+}
+
+/** Elige el PDF «antes» (a) o «después» (b): de la biblioteca o del equipo. */
+function pickCompareSource(lado) {
+  const otro = cmp[lado === 'a' ? 'b' : 'a'];
+  const docs = visibleDocs()
+    .filter((d) => (d.pdf || d.remotePath) && d.id !== otro?.doc?.id)
+    .sort((x, y) => y.created - x.created);
+  chooseAction(lado === 'a' ? 'PDF original (antes)' : 'PDF nuevo (después)', [
+    {
+      label: 'Elegir un PDF del equipo…',
+      run: () => {
+        cmp.inputLado = lado;
+        el.cmpInput.click();
+      },
+    },
+    ...docs.slice(0, 60).map((d) => ({
+      label: `${d.name} · ${d.pageCount || '?'} pág.`,
+      run: () => setCompareSource(lado, { name: d.name, doc: d }),
+    })),
+  ]);
+}
+
+function setCompareSource(lado, fuente) {
+  cmp[lado] = fuente;
+  cmp.texto = null;
+  cmp.visual = null;
+  renderCompare();
+}
+
+async function compareBlob(fuente) {
+  if (!fuente.blob) fuente.blob = await pdfBlobOf(fuente.doc);
+  return fuente.blob;
+}
+
+function renderCompare() {
+  el.cmpAName.textContent = cmp.a?.name ?? 'Elegir PDF…';
+  el.cmpBName.textContent = cmp.b?.name ?? 'Elegir PDF…';
+  el.cmpA.classList.toggle('empty', !cmp.a);
+  el.cmpB.classList.toggle('empty', !cmp.b);
+  el.cmpRun.disabled = !(cmp.a && cmp.b);
+  el.cmpRun.hidden = Boolean(cmp.texto);
+  el.cmpTabs.hidden = !cmp.texto;
+  el.cmpMark.disabled = !cmp.texto?.marcable || !cmp.texto.cambios.length;
+  el.cmpTabs.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.tab === cmp.tab));
+  if (!cmp.texto) {
+    el.cmpResult.innerHTML =
+      '<p class="hint center">Elige los dos PDF y toca «Comparar». Verás los cambios de texto palabra por palabra y, en la comparación visual, las zonas de cada página que cambiaron.</p>';
+    return;
+  }
+  if (cmp.tab === 'texto') renderCompareText();
+  else renderCompareVisual();
+}
+
+async function runCompare() {
+  if (!cmp.a || !cmp.b) return;
+  busy('Comparando…', { fraction: 0 });
+  try {
+    const pdftext = await import('./pdftext.js');
+    const { compareText, linesFromPlainText } = await import('./compare.js');
+    const [blobA, blobB] = [await compareBlob(cmp.a), await compareBlob(cmp.b)];
+    const leer = async (fuente, blob, base) => {
+      const datos = await pdftext.extractWords(blob, (n, t) =>
+        busy('Leyendo el texto…', { fraction: base + (n / t) * 0.5, sub: `${fuente.name} · página ${n} de ${t}` }),
+      );
+      const caracteres = datos.lines.reduce((s, l) => s + l.words.reduce((q, w) => q + w.w.length, 0), 0);
+      if (caracteres >= Math.max(16, datos.pages.length * 8)) return { ...datos, origen: 'pdf' };
+      // Escaneo: se usa el texto del OCR (sin posiciones) si ya se reconoció.
+      const ocr = fuente.doc?.textoOcr?.trim();
+      return ocr ? { ...linesFromPlainText(ocr), paginas: datos.pages.length, origen: 'ocr' } : { ...datos, origen: 'ninguno' };
+    };
+    const A = await leer(cmp.a, blobA, 0);
+    const B = await leer(cmp.b, blobB, 0.5);
+    busy('Buscando diferencias…', { fraction: 1 });
+    const sinTexto = [A, B].map((x, i) => (x.origen === 'ninguno' ? [cmp.a, cmp.b][i].name : null)).filter(Boolean);
+    const res = sinTexto.length ? { cambios: [], sinTexto } : compareText(A, B);
+    cmp.texto = { ...res, origenA: A.origen, origenB: B.origen, marcable: B.origen === 'pdf' && !sinTexto.length };
+    cmp.tab = sinTexto.length ? 'visual' : 'texto';
+    renderCompare(); // la pestaña visual se calcula al mostrarse
+  } catch (error) {
+    toast(`No se pudo comparar: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+function renderCompareText() {
+  const t = cmp.texto;
+  const cont = document.createElement('div');
+  cont.className = 'cmp-text';
+  const resumen = document.createElement('p');
+  resumen.className = 'cmp-summary';
+  if (t.sinTexto?.length) {
+    resumen.textContent = `${t.sinTexto.map((n) => `«${n}»`).join(' y ')} no ${t.sinTexto.length === 1 ? 'tiene' : 'tienen'} texto (escaneo). Usa la comparación visual o reconoce el texto con OCR y vuelve a comparar.`;
+    cont.append(resumen);
+    el.cmpResult.replaceChildren(cont);
+    return;
+  }
+  if (t.demasiado) {
+    resumen.textContent = 'Los documentos son demasiado distintos para compararlos palabra por palabra. Prueba la comparación visual.';
+    cont.append(resumen);
+    el.cmpResult.replaceChildren(cont);
+    return;
+  }
+  const r = t.resumen;
+  resumen.textContent = t.cambios.length
+    ? `${plural(t.cambios.length, 'diferencia', 'diferencias')}: ${plural(r.cambio, 'cambio', 'cambios')}, ${plural(r.agregado, 'agregado', 'agregados')} y ${plural(r.eliminado, 'eliminado', 'eliminados')}.`
+    : 'El texto de los dos documentos es idéntico.';
+  cont.append(resumen);
+  if (t.origenA === 'ocr' || t.origenB === 'ocr') {
+    const aviso = document.createElement('p');
+    aviso.className = 'hint';
+    aviso.textContent = 'Parte del texto viene del OCR: algunas diferencias pueden ser errores de lectura.';
+    cont.append(aviso);
+  }
+  if (t.marcable && t.cambios.length) {
+    const aviso = document.createElement('p');
+    aviso.className = 'hint';
+    aviso.textContent = '«Marcar en PDF» crea una copia del documento nuevo con cada cambio resaltado y las eliminaciones como notas.';
+    cont.append(aviso);
+  }
+  const etiquetas = { cambio: 'Cambiado', agregado: 'Agregado', eliminado: 'Eliminado' };
+  for (const c of t.cambios.slice(0, 400)) {
+    const card = document.createElement('div');
+    card.className = `cmp-change ${c.tipo}`;
+    const pag = c.paginaB != null && c.paginaB >= 0 ? `pág. ${c.paginaB + 1}` : '';
+    card.innerHTML = '<div class="cmp-change-head"><span class="cmp-badge"></span><span class="cmp-page"></span></div>';
+    card.querySelector('.cmp-badge').textContent = etiquetas[c.tipo];
+    card.querySelector('.cmp-page').textContent = pag;
+    if (c.antes) {
+      const del = document.createElement('del');
+      del.textContent = c.antes;
+      card.append(del);
+    }
+    if (c.despues) {
+      const ins = document.createElement('ins');
+      ins.textContent = c.despues;
+      card.append(ins);
+    }
+    cont.append(card);
+  }
+  if (t.cambios.length > 400) {
+    const mas = document.createElement('p');
+    mas.className = 'hint';
+    mas.textContent = `Se muestran las primeras 400 de ${t.cambios.length} diferencias.`;
+    cont.append(mas);
+  }
+  el.cmpResult.replaceChildren(cont);
+}
+
+async function runCompareVisual() {
+  busy('Comparando páginas…', { fraction: 0 });
+  try {
+    const pdftext = await import('./pdftext.js');
+    const { diffImages } = await import('./compare.js');
+    const [blobA, blobB] = [await compareBlob(cmp.a), await compareBlob(cmp.b)];
+    const imgsA = await pdftext.renderPdfPages(blobA, 1100, (n, t) => busy('Comparando páginas…', { fraction: (n / t) * 0.3, sub: `${cmp.a.name} · página ${n} de ${t}` }));
+    const imgsB = await pdftext.renderPdfPages(blobB, 1100, (n, t) => busy('Comparando páginas…', { fraction: 0.3 + (n / t) * 0.3, sub: `${cmp.b.name} · página ${n} de ${t}` }));
+    const total = Math.max(imgsA.length, imgsB.length);
+    const visual = [];
+    for (let i = 0; i < total; i++) {
+      busy('Comparando páginas…', { fraction: 0.6 + (i / total) * 0.4, sub: `Página ${i + 1} de ${total}` });
+      const [a, b] = [imgsA[i], imgsB[i]];
+      const d = a && b ? await diffImages(a, b) : null;
+      visual.push({ n: i + 1, urlA: a ? URL.createObjectURL(a) : null, urlB: b ? URL.createObjectURL(b) : null, ...(d ?? { rects: [], porcentaje: 100 }), soloEn: !a ? 'b' : !b ? 'a' : null });
+    }
+    cmp.visual = visual;
+    renderCompare();
+  } catch (error) {
+    toast(`No se pudo comparar: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+function renderCompareVisual() {
+  if (!cmp.visual) {
+    el.cmpResult.replaceChildren();
+    runCompareVisual();
+    return;
+  }
+  const cont = document.createElement('div');
+  cont.className = 'cmp-visual';
+  const distintas = cmp.visual.filter((p) => p.rects.length || p.soloEn);
+  const resumen = document.createElement('p');
+  resumen.className = 'cmp-summary';
+  resumen.textContent = distintas.length
+    ? `${plural(distintas.length, 'página distinta', 'páginas distintas')} de ${cmp.visual.length}. Las zonas que cambiaron están marcadas en rojo.`
+    : `Las ${cmp.visual.length} páginas se ven iguales.`;
+  const nota = document.createElement('p');
+  nota.className = 'hint';
+  nota.textContent = 'Compara la imagen de cada página. En escaneos, una foto algo movida o con otra luz también se marca como diferencia.';
+  cont.append(resumen, nota);
+  for (const p of cmp.visual) {
+    const card = document.createElement('div');
+    card.className = `cmp-page-card${p.rects.length || p.soloEn ? ' changed' : ''}`;
+    const titulo = document.createElement('p');
+    titulo.className = 'cmp-page-title';
+    titulo.textContent = p.soloEn
+      ? `Página ${p.n}: solo está en el ${p.soloEn === 'a' ? 'original' : 'nuevo'}`
+      : p.rects.length
+        ? `Página ${p.n} · ${p.porcentaje < 1 ? 'menos de 1' : Math.round(p.porcentaje)} % distinto`
+        : `Página ${p.n} · sin diferencias`;
+    const pair = document.createElement('div');
+    pair.className = 'cmp-pair';
+    for (const [url, etiqueta] of [[p.urlA, 'Original'], [p.urlB, 'Nuevo']]) {
+      const fig = document.createElement('figure');
+      fig.className = 'cmp-fig';
+      if (url) {
+        fig.innerHTML = `<div class="cmp-img"><img alt="" src="${url}"></div><figcaption></figcaption>`;
+        const box = fig.querySelector('.cmp-img');
+        for (const r of p.rects) {
+          const m = document.createElement('span');
+          m.className = 'cmp-mark';
+          Object.assign(m.style, { left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` });
+          box.append(m);
+        }
+      } else fig.innerHTML = '<div class="cmp-img missing">No existe</div><figcaption></figcaption>';
+      fig.querySelector('figcaption').textContent = etiqueta;
+      pair.append(fig);
+    }
+    card.append(titulo, pair);
+    cont.append(card);
+  }
+  el.cmpResult.replaceChildren(cont);
+}
+
+/** Crea una copia del PDF nuevo con los cambios marcados como comentarios. */
+async function markCompare() {
+  const t = cmp?.texto;
+  if (!t?.marcable) return;
+  busy('Marcando cambios…');
+  try {
+    const marks = [];
+    const recorta = (s) => (s.length > 300 ? `${s.slice(0, 300)}…` : s);
+    for (const c of t.cambios) {
+      if (c.palabrasB.length) {
+        // Un resaltado por renglón (palabras seguidas en la misma línea).
+        let grupo = null;
+        const grupos = [];
+        for (const w of c.palabrasB) {
+          if (grupo && grupo.page === w.page && Math.abs(grupo.y0 - w.y0) < 2 && w.x0 - grupo.x1 < 40) {
+            grupo.x1 = Math.max(grupo.x1, w.x1);
+            grupo.y1 = Math.max(grupo.y1, w.y1);
+          } else grupos.push((grupo = { page: w.page, x0: w.x0, y0: w.y0, x1: w.x1, y1: w.y1 }));
+        }
+        for (const [k, g] of grupos.entries()) {
+          marks.push({
+            page: g.page,
+            type: 'highlight',
+            rect: [g.x0, g.y0, g.x1, g.y1],
+            color: c.tipo === 'agregado' ? '#5ee08a' : '#ffe600',
+            comment: k ? '' : c.tipo === 'agregado' ? 'Agregado' : `Antes: «${recorta(c.antes)}»`,
+          });
+        }
+      } else if (c.ancla) {
+        const w = c.ancla;
+        marks.push({ page: w.page, type: 'note', rect: [w.x0 - 20, w.y1, w.x0, w.y1 + 20], color: '#ff6b6b', comment: `Eliminado: «${recorta(c.antes)}»` });
+      }
+    }
+    const edit = await import('./pdfedit.js');
+    const pdf = await edit.markChanges(await compareBlob(cmp.b), marks, { author: authorName() });
+    busy(null);
+    const nombre = `${sanitizeName(cmp.b.name)} (cambios marcados)`;
+    chooseAction('PDF con los cambios marcados', [
+      {
+        label: 'Guardar en la biblioteca',
+        run: async () => {
+          const doc = await saveNewPdf(pdf, nombre, { carpetaId: cmp.b.doc?.carpetaId });
+          closeCompare();
+          renderLibrary();
+          processQueue();
+          openViewer(doc);
+          toast('Listo: cada cambio está resaltado y las eliminaciones son notas.');
+        },
+      },
+      { label: 'Descargar', run: () => shareOrDownload(new File([pdf], `${nombre}.pdf`, { type: 'application/pdf' })) },
+    ]);
+  } catch (error) {
+    toast(`No se pudo marcar: ${error.message}`);
   } finally {
     busy(null);
   }
@@ -4475,6 +4784,33 @@ function setup() {
     el.busyStop.hidden = true;
     el.busySub.textContent = 'Deteniendo al terminar el documento actual…';
   });
+  // Comparar PDF
+  el.cmpClose.addEventListener('click', closeCompare);
+  el.cmpA.addEventListener('click', () => pickCompareSource('a'));
+  el.cmpB.addEventListener('click', () => pickCompareSource('b'));
+  el.cmpSwap.addEventListener('click', () => {
+    [cmp.a, cmp.b] = [cmp.b, cmp.a];
+    cmp.texto = null;
+    cmp.visual = null;
+    renderCompare();
+  });
+  el.cmpRun.addEventListener('click', runCompare);
+  el.cmpMark.addEventListener('click', markCompare);
+  el.cmpTabs.addEventListener('click', (event) => {
+    const tab = event.target.closest('button')?.dataset.tab;
+    if (!tab || !cmp) return;
+    cmp.tab = tab;
+    renderCompare();
+  });
+  el.cmpInput.addEventListener('change', async () => {
+    const [file] = el.cmpInput.files;
+    el.cmpInput.value = '';
+    if (!file || !cmp) return;
+    const buffer = await file.arrayBuffer();
+    if (new TextDecoder('latin1').decode(buffer.slice(0, 4)) !== '%PDF') return toast('El archivo no es un PDF.');
+    setCompareSource(cmp.inputLado ?? 'b', { name: sanitizeName(file.name), blob: new Blob([buffer], { type: 'application/pdf' }) });
+  });
+
   // Proteger PDF
   el.prClose.addEventListener('click', closeProtect);
   for (const c of [el.prPass, el.prPass2, el.prShow, el.prPrint, el.prCopy, el.prEdit]) c.addEventListener('input', updateProtect);

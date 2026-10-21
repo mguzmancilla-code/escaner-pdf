@@ -205,6 +205,28 @@
     </div>
   </section>
 
+  <!-- Comparar PDF -->
+  <section id="compare" class="screen sheet" hidden>
+    <header class="bar">
+      <button id="cmpClose" class="text-btn" type="button">Cerrar</button>
+      <h1>Comparar PDF</h1>
+      <button id="cmpMark" class="text-btn strong" type="button" disabled>Marcar en PDF</button>
+    </header>
+    <div class="scroll cmp-body">
+      <div class="cmp-slots">
+        <button id="cmpA" class="cmp-slot empty" type="button"><span class="cmp-label">Original (antes)</span><span id="cmpAName" class="cmp-name"></span></button>
+        <button id="cmpSwap" class="cmp-swap" type="button" title="Intercambiar">⇄</button>
+        <button id="cmpB" class="cmp-slot empty" type="button"><span class="cmp-label">Nuevo (después)</span><span id="cmpBName" class="cmp-name"></span></button>
+      </div>
+      <button id="cmpRun" class="btn primary" type="button" disabled>Comparar</button>
+      <div id="cmpTabs" class="segmented light" hidden>
+        <button type="button" data-tab="texto" class="active">Cambios de texto</button>
+        <button type="button" data-tab="visual">Comparación visual</button>
+      </div>
+      <div id="cmpResult"></div>
+    </div>
+  </section>
+
   <!-- Proteger PDF -->
   <section id="protect" class="screen sheet" hidden>
     <header class="bar">
@@ -349,6 +371,7 @@
   <input id="pdfInput" class="file-input" type="file" accept="application/pdf,.pdf" multiple>
   <input id="folderInput" class="file-input" type="file" webkitdirectory multiple>
   <input id="mixedInput" class="file-input" type="file" accept="application/pdf,.pdf,image/*" multiple>
+  <input id="cmpInput" class="file-input" type="file" accept="application/pdf,.pdf">
   <input id="txCameraInput" class="file-input" type="file" accept="image/*" capture="environment">
   <input id="txImagesInput" class="file-input" type="file" accept="image/*" multiple>
 </body>

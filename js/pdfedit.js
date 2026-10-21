@@ -395,3 +395,24 @@ export async function applyAnnotations(blob, items, { author = '' } = {}) {
   }
   return asBlob(await doc.save({ useObjectStreams: false }));
 }
+
+/**
+ * Marca diferencias sobre un PDF con comentarios reales: resaltados (agregado o
+ * cambiado) y notas (eliminado). Las posiciones vienen en puntos PDF.
+ * @param {{ page: number, type: 'highlight'|'note', rect: number[], color: string, comment: string }[]} marks
+ */
+export async function markChanges(blob, marks, { author = '' } = {}) {
+  const PDFLib = await pdflib();
+  const doc = await loadDoc(PDFLib, blob);
+  const pages = doc.getPages();
+  for (const mk of marks) {
+    const page = pages[mk.page];
+    if (!page) continue;
+    const [x0, y0, x1, y1] = mk.rect;
+    // Cuadro unitario de «vista» → rectángulo en la página.
+    const toPdf = (u, v) => [x0 + u * (x1 - x0), y1 - v * (y1 - y0)];
+    const it = { type: mk.type, xr: 0, yr: 0, wr: 1, hr: 1, color: mk.color, comment: mk.comment, text: mk.comment };
+    addComment(PDFLib, doc, page, it, { toPdf, vista: { w: 1, h: 1 }, author });
+  }
+  return asBlob(await doc.save({ useObjectStreams: false }));
+}

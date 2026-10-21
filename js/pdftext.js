@@ -228,3 +228,46 @@ export async function renderPageRange(data, desde, hasta, maxSide = 2000, qualit
   }
   return salida;
 }
+
+/**
+ * Extrae las palabras de cada página con su posición (en puntos PDF, origen
+ * abajo-izquierda), agrupadas por línea de lectura. Sirve para comparar PDF y
+ * marcar las diferencias en su lugar exacto.
+ * @returns {{ pages: {width: number, height: number}[], lines: {page: number, words: {w: string, page: number, x0: number, y0: number, x1: number, y1: number}[]}[] }}
+ */
+export async function extractWords(data, onPage) {
+  const doc = await openPdf(data);
+  const pages = [];
+  const lines = [];
+  try {
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = await doc.getPage(n);
+      const vp = page.getViewport({ scale: 1 });
+      pages.push({ width: vp.width, height: vp.height });
+      const content = await page.getTextContent();
+      const grupos = new Map(); // Y redondeado → palabras
+      for (const item of content.items) {
+        if (!item.str?.trim()) continue;
+        const [a, b, , , e, f] = item.transform;
+        const alto = Math.hypot(a, b) || item.height || 10;
+        const largo = item.str.length;
+        // Cada palabra se ubica en proporción a su posición dentro del fragmento.
+        for (const m of item.str.matchAll(/\S+/g)) {
+          const x0 = e + (item.width * m.index) / largo;
+          const x1 = e + (item.width * (m.index + m[0].length)) / largo;
+          const y = Math.round(f / 3) * 3;
+          if (!grupos.has(y)) grupos.set(y, []);
+          grupos.get(y).push({ w: m[0], page: n - 1, x0, x1, y0: f - alto * 0.22, y1: f + alto * 0.9 });
+        }
+      }
+      for (const y of [...grupos.keys()].sort((p, q) => q - p)) {
+        lines.push({ page: n - 1, words: grupos.get(y).sort((p, q) => p.x0 - q.x0) });
+      }
+      page.cleanup();
+      onPage?.(n, doc.numPages);
+    }
+  } finally {
+    await doc.destroy();
+  }
+  return { pages, lines };
+}
