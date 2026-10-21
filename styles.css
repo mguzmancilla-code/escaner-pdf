@@ -783,3 +783,7 @@ svg.icon { width: 22px; height: 22px; flex: none; }
 .adjust-row input[type="range"] { width: 100%; accent-color: var(--accent); height: 28px; }
 #filterControls { flex-direction: column; align-items: stretch; }
 #filterControls .segmented { align-self: center; }
+
+/* Formularios centrados con ancho máximo propio: sin el margen lateral general de .scroll. */
+.scroll.pr-body,
+.scroll.tx-body { padding-inline: 16px; box-sizing: border-box; }
