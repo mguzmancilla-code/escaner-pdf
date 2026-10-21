@@ -127,12 +127,153 @@ const winAnsi = (texto) =>
     .replace(/…/g, '...')
     .replace(/[^\x00-\xFF]/g, '?');
 
+// ---------------------------------------------------------------------------
+// Comentarios PDF reales (anotaciones): se ven en el panel de comentarios de
+// Adobe, Edge, Chrome o Vista Previa, y se pueden editar o borrar allí.
+// Cada uno lleva su apariencia (/AP) para verse igual en todos los lectores.
+// ---------------------------------------------------------------------------
+
+export const COMMENT_TYPES = new Set(['note', 'highlight', 'underline', 'strike', 'pen', 'rect']);
+
+const SUBTYPE = { note: 'Text', highlight: 'Highlight', underline: 'Underline', strike: 'StrikeOut', pen: 'Ink', rect: 'Square' };
+
+const num = (v) => (Math.round(v * 1000) / 1000).toString();
+
+function pdfDate(d = new Date()) {
+  const p = (v) => String(v).padStart(2, '0');
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const a = Math.abs(off);
+  return `D:${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${sign}${p(Math.floor(a / 60))}'${p(a % 60)}'`;
+}
+
+function rgbArray(hex) {
+  const h = (hex || '#000000').replace('#', '');
+  const v = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.padEnd(6, '0');
+  return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16) / 255);
+}
+
+/** Crea el comentario `it` en la página. `toPdf` pasa de coordenadas de vista (0–1) a puntos PDF. */
+function addComment(PDFLib, doc, page, it, { toPdf, vista, author }) {
+  const { PDFName, PDFHexString, PDFString } = PDFLib;
+  const ctx = doc.context;
+  const [r, g, b] = rgbArray(it.color);
+  const color = `${num(r)} ${num(g)} ${num(b)}`;
+
+  let rect;
+  let content;
+  let opacity = 1;
+  const extra = {};
+
+  // Esquinas del área marcada, en el orden que piden QuadPoints:
+  // arriba-izquierda, arriba-derecha, abajo-izquierda, abajo-derecha (de la vista).
+  const quad = () => {
+    const pts = [
+      toPdf(it.xr, it.yr),
+      toPdf(it.xr + it.wr, it.yr),
+      toPdf(it.xr, it.yr + it.hr),
+      toPdf(it.xr + it.wr, it.yr + it.hr),
+    ];
+    return pts;
+  };
+  const bbox = (pts, pad = 0) => {
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    return [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad];
+  };
+
+  if (it.type === 'highlight' || it.type === 'underline' || it.type === 'strike') {
+    const q = quad();
+    const [tl, tr, bl, br] = q;
+    rect = bbox(q, 1);
+    extra.QuadPoints = q.flat();
+    if (it.type === 'highlight') {
+      opacity = 0.4;
+      content = `${color} rg ${num(tl[0])} ${num(tl[1])} m ${num(tr[0])} ${num(tr[1])} l ${num(br[0])} ${num(br[1])} l ${num(bl[0])} ${num(bl[1])} l h f`;
+    } else {
+      // Línea a lo largo del área: abajo (subrayado) o al medio (tachado).
+      const t = it.type === 'underline' ? 0.92 : 0.5;
+      const lerp = (p, q2, k) => [p[0] + (q2[0] - p[0]) * k, p[1] + (q2[1] - p[1]) * k];
+      const a = lerp(tl, bl, t);
+      const z = lerp(tr, br, t);
+      const alto = Math.hypot(bl[0] - tl[0], bl[1] - tl[1]);
+      const w = Math.max(0.8, Math.min(2.5, alto * 0.07));
+      content = `${color} RG ${num(w)} w 1 J ${num(a[0])} ${num(a[1])} m ${num(z[0])} ${num(z[1])} l S`;
+    }
+  } else if (it.type === 'pen') {
+    const pts = it.points.map(([x, y]) => toPdf(x, y));
+    const w = Math.max(0.5, (it.thickness || 0.004) * vista.h);
+    rect = bbox(pts, w);
+    extra.InkList = [pts.flat()];
+    extra.BS = { W: w, S: 'S' };
+    const path = pts.map((p, i) => `${num(p[0])} ${num(p[1])} ${i ? 'l' : 'm'}`).join(' ');
+    content = `${color} RG ${num(w)} w 1 J 1 j ${path} S`;
+  } else if (it.type === 'rect') {
+    const q = quad();
+    const w = Math.max(0.5, (it.thickness || 0.004) * vista.h);
+    rect = bbox(q, w / 2);
+    extra.BS = { W: w, S: 'S' };
+    const [tl, tr, bl, br] = q;
+    content = `${color} RG ${num(w)} w 1 j ${num(tl[0])} ${num(tl[1])} m ${num(tr[0])} ${num(tr[1])} l ${num(br[0])} ${num(br[1])} l ${num(bl[0])} ${num(bl[1])} l h S`;
+  } else if (it.type === 'note') {
+    // Ícono de nota de 22 pt (globo de texto) con la esquina superior izquierda en el punto tocado.
+    const [x, y] = toPdf(it.xr, it.yr);
+    const s = 22;
+    rect = [x, y - s, x + s, y];
+    extra.Name = 'Comment';
+    extra.Open = false;
+    const x0 = x + 1;
+    const y0 = y - s + 5;
+    content =
+      `${color} rg 0.25 0.25 0.25 RG 0.8 w ${num(x0)} ${num(y0)} 20 16 re B ` +
+      `${num(x0 + 4)} ${num(y0)} m ${num(x0 + 3)} ${num(y0 - 4)} l ${num(x0 + 9)} ${num(y0)} l f ` +
+      `1 1 1 RG 1.2 w ${num(x0 + 4)} ${num(y0 + 11)} m ${num(x0 + 16)} ${num(y0 + 11)} l ` +
+      `${num(x0 + 4)} ${num(y0 + 7.5)} m ${num(x0 + 16)} ${num(y0 + 7.5)} l ${num(x0 + 4)} ${num(y0 + 4)} m ${num(x0 + 12)} ${num(y0 + 4)} l S`;
+  } else return;
+
+  // Apariencia: formulario con BBox = Rect (así se dibuja en coordenadas de página).
+  const resources = opacity < 1 ? { ExtGState: { G0: { CA: opacity, ca: opacity, BM: 'Multiply' } } } : {};
+  const ap = ctx.stream(`q ${opacity < 1 ? '/G0 gs ' : ''}${content} Q`, {
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: rect,
+    Resources: resources,
+  });
+  const apRef = ctx.register(ap);
+
+  const dict = ctx.obj({
+    Type: 'Annot',
+    Subtype: SUBTYPE[it.type],
+    Rect: rect,
+    C: [r, g, b],
+    F: 4, // imprimible
+    ...(opacity < 1 ? { CA: opacity } : {}),
+    ...extra,
+    AP: { N: apRef },
+    P: page.ref,
+  });
+  dict.set(PDFName.of('M'), PDFString.of(pdfDate()));
+  dict.set(PDFName.of('CreationDate'), PDFString.of(pdfDate()));
+  dict.set(PDFName.of('NM'), PDFString.of(`agnescan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`));
+  if (author) dict.set(PDFName.of('T'), PDFHexString.fromText(author));
+  if (it.comment || it.text) dict.set(PDFName.of('Contents'), PDFHexString.fromText(it.comment || it.text));
+  const ref = ctx.register(dict);
+
+  let annots = page.node.Annots();
+  if (!annots) {
+    annots = ctx.obj([]);
+    page.node.set(PDFName.of('Annots'), annots);
+  }
+  annots.push(ref);
+}
+
 /**
  * Dibuja anotaciones sobre un PDF y devuelve una copia nueva. Las coordenadas de
  * cada anotación son relativas (0–1) al alto/ancho de la página, con origen
- * arriba-izquierda (como en pantalla). Tipos: text, redact, highlight, draw.
+ * arriba-izquierda (como en pantalla). Se dibujan en la página: text, redact, image,
+ * stamp y draw (firma). Los de COMMENT_TYPES quedan como comentarios editables.
  */
-export async function applyAnnotations(blob, items) {
+export async function applyAnnotations(blob, items, { author = '' } = {}) {
   const PDFLib = await pdflib();
   const doc = await loadDoc(PDFLib, blob);
   const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
@@ -149,6 +290,12 @@ export async function applyAnnotations(blob, items) {
     const toPdf = (ur, vr) => viewToPdf(ur, vr, W, H, rot);
     // La dimensión "corta" de la vista según la orientación (para alto de texto).
     const vista = rot === 90 || rot === 270 ? { w: H, h: W } : { w: W, h: H };
+
+    // Resaltar, subrayar, tachar, notas, lápiz y recuadros: comentarios reales.
+    if (COMMENT_TYPES.has(it.type)) {
+      addComment(PDFLib, doc, page, it, { toPdf, vista, author });
+      continue;
+    }
 
     if (it.type === 'redact' || it.type === 'highlight') {
       const [x0, y0] = toPdf(it.xr, it.yr);

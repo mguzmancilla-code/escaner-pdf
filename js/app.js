@@ -35,6 +35,10 @@ const ICONS = {
   rotateRight: '<path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v5h-5"/>',
   chevronLeft: '<path d="M15 18l-6-6 6-6"/>',
   chevronRight: '<path d="M9 18l6-6-6-6"/>',
+  note: '<path d="M4 5h16v11H10l-5 4v-4H4z"/><path d="M8 9h8M8 12.5h5"/>',
+  underline: '<path d="M7 4v7a5 5 0 0 0 10 0V4M5 20h14"/>',
+  strike: '<path d="M4 12h16M16.5 7C15.6 5.4 14 4.5 12 4.5c-2.6 0-4.3 1.4-4.3 3.2 0 1.3.8 2.2 2.3 2.9M8 16.5c.9 1.8 2.4 3 4.4 3 2.6 0 4.3-1.4 4.3-3.3"/>',
+  rect: '<rect x="4" y="6" width="16" height="12" rx="1.5"/>',
   pencil: '<path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/>',
   doc: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/>',
   docImport: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M12 11v6M9 14l3 3 3-3"/>',
@@ -88,7 +92,7 @@ for (const id of [
   'viewer', 'viewerBack', 'viewerTitle', 'viewerPages', 'shareBtn', 'downloadBtn', 'deleteBtn', 'toolsBtn',
   'combine', 'combCancel', 'combDo', 'combOrder', 'combList', 'combImport',
   'organize', 'orgCancel', 'orgTitle', 'orgSave', 'orgHint', 'orgGrid', 'orgActions',
-  'annotate', 'annCancel', 'annSave', 'annTools', 'annHint', 'annPages',
+  'annotate', 'annCancel', 'annSave', 'annTools', 'annHint', 'annList', 'annPages',
   'busy', 'busyText', 'busySpinner', 'busyBar', 'busyBarFill', 'busySub', 'busyStop', 'toast',
   'cameraInput', 'imagesInput', 'pdfInput', 'folderInput', 'mixedInput',
   'textx', 'txClose', 'txCopy', 'txHint', 'txCamera', 'txImages', 'txPaste', 'txThumbs', 'txText', 'txCount',
@@ -1755,7 +1759,7 @@ function toolsMenu() {
   const doc = state.current;
   const opciones = [
     { label: doc.favorito ? '★ Quitar de favoritos' : '☆ Agregar a favoritos', run: () => toggleFavorite(doc) },
-    { label: 'Anotar / firmar', run: () => openAnnotate(doc) },
+    { label: 'Comentar / anotar / firmar', run: () => openAnnotate(doc) },
     { label: 'Copiar / exportar texto', run: () => textxFromDoc(doc) },
   ];
   if (signedIn() && doc.userId && ['pendiente', 'error'].includes(doc.sync)) {
@@ -2459,22 +2463,46 @@ async function doExportImages(doc, type) {
 // Herramienta: Anotar / firmar
 // ---------------------------------------------------------------------------
 
+// Las primeras (tras «Mover») quedan como comentarios PDF reales, editables en
+// Adobe, Edge o Chrome; las demás se dibujan sobre la página (firma, timbre…).
 const ANN_TOOLS = [
   { id: 'select', icon: 'cursor', label: 'Mover' },
+  { sep: true },
+  { id: 'note', icon: 'note', label: 'Nota' },
+  { id: 'highlight', icon: 'marker', label: 'Resaltar' },
+  { id: 'underline', icon: 'underline', label: 'Subrayar' },
+  { id: 'strike', icon: 'strike', label: 'Tachar' },
+  { id: 'pen', icon: 'pencil', label: 'Lápiz' },
+  { id: 'rect', icon: 'rect', label: 'Recuadro' },
+  { sep: true },
   { id: 'text', icon: 'textT', label: 'Texto' },
   { id: 'redact', icon: 'redactbox', label: 'Tapar' },
-  { id: 'highlight', icon: 'marker', label: 'Resaltar' },
   { id: 'draw', icon: 'signature', label: 'Firmar' },
   { id: 'stamp', icon: 'stamp', label: 'Timbre' },
 ];
+const ANN_COMMENT_TYPES = new Set(['note', 'highlight', 'underline', 'strike', 'pen', 'rect']);
+const ANN_LABELS = { note: 'Nota', highlight: 'Resaltado', underline: 'Subrayado', strike: 'Tachado', pen: 'Lápiz', rect: 'Recuadro' };
+const ANN_DEFAULT_COLOR = { highlight: '#ffe600', note: '#ffe600', underline: '#1a4fd6', strike: '#e5332a' };
 const ANN_HINTS = {
-  select: 'Toca una anotación para seleccionarla; arrástrala para moverla.',
+  select: 'Toca una anotación para seleccionarla; arrástrala para moverla. Supr la borra y Ctrl + Z deshace.',
+  note: 'Toca donde quieras dejar una nota (comentario).',
+  highlight: 'Arrastra sobre el texto para resaltarlo.',
+  underline: 'Arrastra sobre el texto para subrayarlo.',
+  strike: 'Arrastra sobre el texto para tacharlo.',
+  pen: 'Dibuja a mano alzada (queda como comentario que se puede borrar en Adobe).',
+  rect: 'Arrastra para enmarcar un área.',
   text: 'Toca donde quieras escribir.',
   redact: 'Arrastra para tapar un área (recuadro opaco).',
-  highlight: 'Arrastra para resaltar (color translúcido).',
   draw: 'Arrastra para firmar o dibujar a mano alzada. También puedes importar una firma.',
   stamp: 'Toca donde quieras poner el timbre con tus datos y un folio.',
 };
+const ANN_THICKNESS = [['Fino', 0.002], ['Medio', 0.004], ['Grueso', 0.008]];
+
+/** Nombre del autor de los comentarios: el del perfil o, si no hay, el correo. */
+function authorName() {
+  const u = state.user;
+  return u?.user_metadata?.full_name || u?.user_metadata?.name || u?.email?.split('@')[0] || 'AgneScan';
+}
 
 function generarFolio() {
   const d = new Date();
@@ -2506,6 +2534,9 @@ async function openAnnotate(doc) {
       items: [],
       tool: 'select',
       color: '#e5332a',
+      colorByTool: {},
+      thickness: 0.004,
+      history: [],
       textSize: 0.025,
       selected: null,
       draft: null,
@@ -2522,6 +2553,21 @@ async function openAnnotate(doc) {
   }
 }
 
+/** Guarda el estado de las anotaciones para poder deshacer. */
+function pushAnnHistory() {
+  ann.history.push(JSON.stringify(ann.items));
+  if (ann.history.length > 40) ann.history.shift();
+}
+
+function undoAnn() {
+  const prev = ann?.history.pop();
+  if (prev == null) return;
+  ann.items = JSON.parse(prev);
+  ann.selected = null;
+  renderAnnTools();
+  renderAnnPages();
+}
+
 function closeAnnotate() {
   ann?.pages.forEach((p) => URL.revokeObjectURL(p.url));
   ann = null;
@@ -2533,9 +2579,37 @@ const ANN_COLORS = ['#ffffff', '#e5332a', '#1a4fd6', '#111111', '#2e7d32', '#ffe
 function setAnnColor(value) {
   ann.color = value;
   const it = ann.selected && ann.items.find((i) => i.id === ann.selected);
-  if (it) it.color = value;
+  if (it) {
+    pushAnnHistory();
+    it.color = value;
+  } else ann.colorByTool[ann.tool] = value;
   renderAnnTools();
   markAnnSelected();
+}
+
+function setAnnThickness(value) {
+  ann.thickness = value;
+  const it = ann.selected && ann.items.find((i) => i.id === ann.selected && (i.type === 'pen' || i.type === 'rect'));
+  if (it) {
+    pushAnnHistory();
+    it.thickness = value;
+  }
+  renderAnnTools();
+  markAnnSelected();
+}
+
+/** Agrega o cambia el comentario (texto) de una anotación. */
+function editAnnComment(it) {
+  const actual = it.type === 'note' ? it.text : it.comment || '';
+  const texto = prompt(it.type === 'note' ? 'Texto de la nota:' : `Comentario del ${ANN_LABELS[it.type].toLowerCase()}:`, actual);
+  if (texto == null) return;
+  pushAnnHistory();
+  if (it.type === 'note') {
+    if (!texto.trim()) ann.items = ann.items.filter((i) => i.id !== it.id);
+    else it.text = texto.trim();
+  } else it.comment = texto.trim();
+  renderAnnTools();
+  renderAnnPages();
 }
 
 function setAnnTextSize(value) {
@@ -2547,20 +2621,23 @@ function setAnnTextSize(value) {
 }
 
 function renderAnnTools() {
+  const sep = () => Object.assign(document.createElement('span'), { className: 'ann-sep' });
   const tools = ANN_TOOLS.map((t) => {
+    if (t.sep) return sep();
     const b = document.createElement('button');
     b.className = `ann-tool${ann.tool === t.id ? ' active' : ''}`;
     b.innerHTML = `${icon(t.icon)}<span>${t.label}</span>`;
+    b.title = ANN_HINTS[t.id];
     b.addEventListener('click', () => {
       ann.tool = t.id;
       ann.selected = null;
+      // Cada herramienta recuerda su color (resaltar parte en amarillo).
+      ann.color = ann.colorByTool[t.id] ?? ANN_DEFAULT_COLOR[t.id] ?? ann.color;
       renderAnnTools();
       markAnnSelected();
     });
     return b;
   });
-
-  const sep = () => Object.assign(document.createElement('span'), { className: 'ann-sep' });
 
   // Paleta de colores (chips) + selector personalizado.
   const palette = document.createElement('div');
@@ -2599,6 +2676,22 @@ function renderAnnTools() {
     }
     extras.push(sizes);
   }
+  // Grosor del trazo (lápiz y recuadro).
+  const selStroke = ann.selected && ann.items.find((i) => i.id === ann.selected && (i.type === 'pen' || i.type === 'rect'));
+  if (ann.tool === 'pen' || ann.tool === 'rect' || selStroke) {
+    const grosores = document.createElement('div');
+    grosores.className = 'ann-sizes';
+    const actual = selStroke ? selStroke.thickness ?? 0.004 : ann.thickness;
+    for (const [label, value] of ANN_THICKNESS) {
+      const b = document.createElement('button');
+      b.className = `ann-size ann-stroke${Math.abs(actual - value) < 0.0005 ? ' active' : ''}`;
+      b.title = label;
+      b.innerHTML = `<span style="height:${Math.round(value * 500)}px"></span>`;
+      b.addEventListener('click', () => setAnnThickness(value));
+      grosores.append(b);
+    }
+    extras.push(grosores);
+  }
   // Importar una imagen de firma (p. ej. PNG con fondo transparente) y reutilizar guardadas.
   if (ann.tool === 'draw') {
     const imp = document.createElement('button');
@@ -2612,6 +2705,21 @@ function renderAnnTools() {
     guard.addEventListener('click', firmasGuardadasMenu);
     extras.push(guard);
   }
+  const selComment = ann.selected && ann.items.find((i) => i.id === ann.selected && ANN_COMMENT_TYPES.has(i.type));
+  if (selComment) {
+    const com = document.createElement('button');
+    com.className = 'ann-tool';
+    com.innerHTML = `${icon('note')}<span>${selComment.type === 'note' ? 'Editar nota' : selComment.comment ? 'Editar comentario' : 'Comentario'}</span>`;
+    com.addEventListener('click', () => editAnnComment(selComment));
+    extras.push(com);
+  }
+  if (ann.history.length) {
+    const undo = document.createElement('button');
+    undo.className = 'ann-tool';
+    undo.innerHTML = `${icon('rotateLeft')}<span>Deshacer</span>`;
+    undo.addEventListener('click', undoAnn);
+    extras.push(undo);
+  }
   if (ann.selected) {
     const del = document.createElement('button');
     del.className = 'ann-tool danger';
@@ -2622,6 +2730,43 @@ function renderAnnTools() {
 
   el.annTools.replaceChildren(...tools, sep(), palette, ...(extras.length ? [sep(), ...extras] : []));
   el.annHint.textContent = ANN_HINTS[ann.tool];
+  renderAnnList();
+}
+
+/** Lista de comentarios (barra lateral en computador): tocar uno lo selecciona. */
+function renderAnnList() {
+  const comentarios = ann.items.filter((i) => ANN_COMMENT_TYPES.has(i.type)).sort((a, b) => a.page - b.page || a.id - b.id);
+  if (!comentarios.length) {
+    el.annList.replaceChildren();
+    el.annList.hidden = true;
+    return;
+  }
+  el.annList.hidden = false;
+  const titulo = document.createElement('p');
+  titulo.className = 'section-title';
+  titulo.textContent = `Comentarios (${comentarios.length})`;
+  el.annList.replaceChildren(
+    titulo,
+    ...comentarios.map((it) => {
+      const row = document.createElement('button');
+      row.className = `ann-row${it.id === ann.selected ? ' active' : ''}`;
+      row.innerHTML = '<span class="ann-row-dot"></span><span class="ann-row-body"><span class="ann-row-head"></span><span class="ann-row-text"></span></span>';
+      row.querySelector('.ann-row-dot').style.background = it.color;
+      row.querySelector('.ann-row-head').textContent = `${ANN_LABELS[it.type]} · pág. ${it.page + 1}`;
+      const texto = it.type === 'note' ? it.text : it.comment;
+      row.querySelector('.ann-row-text').textContent = texto || 'Agregar comentario…';
+      row.querySelector('.ann-row-text').classList.toggle('empty', !texto);
+      row.addEventListener('click', () => {
+        if (ann.selected === it.id) return editAnnComment(it);
+        ann.tool = 'select';
+        ann.selected = it.id;
+        renderAnnTools();
+        markAnnSelected();
+        el.annPages.querySelector(`.ann-item[data-id="${it.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+      return row;
+    }),
+  );
 }
 
 // Firmas guardadas (en este navegador) para reutilizarlas.
@@ -2635,6 +2780,7 @@ async function addSignatureItem(dataUrl) {
   const ar = img.width / img.height;
   const wr = 0.32;
   const hr = (wr * page.width) / ar / page.height;
+  pushAnnHistory();
   ann.items.push({ id: ann.nextId++, page: 0, type: 'image', xr: (1 - wr) / 2, yr: 0.8, wr, hr, dataUrl });
   ann.tool = 'select';
   renderAnnTools();
@@ -2757,11 +2903,31 @@ function renderAnnPages() {
   );
 }
 
-function renderAnnItems(layer, pageIndex) {
+function renderAnnItems(layer, pageIndex, extra = null) {
   layer.replaceChildren();
-  for (const it of ann.items.filter((x) => x.page === pageIndex)) {
+  const lista = ann.items.filter((x) => x.page === pageIndex);
+  if (extra) lista.push(extra);
+  for (const it of lista) {
     let node;
-    if (it.type === 'text') {
+    if (it.type === 'note') {
+      node = document.createElement('div');
+      node.className = 'ann-item ann-note';
+      node.style.left = `${it.xr * 100}%`;
+      node.style.top = `${it.yr * 100}%`;
+      node.style.setProperty('--c', it.color);
+      node.title = it.text;
+      node.innerHTML = icon('note');
+    } else if (it.type === 'underline' || it.type === 'strike' || it.type === 'rect') {
+      node = document.createElement('div');
+      node.className = `ann-item ann-${it.type}`;
+      node.style.left = `${it.xr * 100}%`;
+      node.style.top = `${it.yr * 100}%`;
+      node.style.width = `${it.wr * 100}%`;
+      node.style.height = `${it.hr * 100}%`;
+      node.style.setProperty('--c', it.color);
+      if (it.type === 'rect') node.style.setProperty('--w', `${Math.max(1, (it.thickness ?? 0.004) * 100)}cqh`);
+      if (it.comment) node.title = it.comment;
+    } else if (it.type === 'text') {
       node = document.createElement('div');
       node.className = 'ann-item ann-text';
       node.style.left = `${it.xr * 100}%`;
@@ -2802,10 +2968,13 @@ function renderAnnItems(layer, pageIndex) {
       node.style.height = `${it.hr * 100}%`;
       if (it.type === 'redact') node.style.background = it.color;
       if (it.type === 'highlight') node.style.background = it.color;
-      if (it.type === 'draw') {
+      if (it.comment) node.title = it.comment;
+      if (it.type === 'draw' || it.type === 'pen') {
         // El contenedor es el recuadro que ocupa el trazo, así se puede
         // seleccionar y mover tocando sobre la firma.
         node.className = 'ann-item ann-draw';
+        // Lápiz: grosor real (relativo al alto de la página); firma: trazo fino fijo.
+        const ancho = it.type === 'pen' ? Math.max(1, (it.thickness ?? 0.004) * (layer.clientHeight || 1000)) : 0.5;
         const xs = it.points.map((pt) => pt[0]);
         const ys = it.points.map((pt) => pt[1]);
         const minX = Math.min(...xs);
@@ -2817,7 +2986,7 @@ function renderAnnItems(layer, pageIndex) {
         node.style.width = `${bw * 100}%`;
         node.style.height = `${bh * 100}%`;
         const pts = it.points.map(([x, y]) => `${((x - minX) / bw) * 100},${((y - minY) / bh) * 100}`).join(' ');
-        node.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${it.color}" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+        node.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${it.color}" stroke-width="${ancho}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
       }
     }
     node.dataset.id = it.id;
@@ -2856,7 +3025,7 @@ function annPointerDown(event, pageIndex, wrap) {
       const start = annRelative(event, wrap);
       // Se guarda el nodo y se mueve directamente, sin recrearlo (recrearlo al
       // iniciar cancelaba el gesto). Las escuchas van en window, no en el nodo.
-      ann.drag = { id, lastX: start.xr, lastY: start.yr, wrap, layer: wrap.querySelector('.ann-layer'), node: hitNode };
+      ann.drag = { id, lastX: start.xr, lastY: start.yr, wrap, layer: wrap.querySelector('.ann-layer'), node: hitNode, snapshot: JSON.stringify(ann.items), moved: false };
       wrap.querySelectorAll('.ann-item.selected').forEach((n) => n.classList.remove('selected'));
       hitNode.classList.add('selected');
       renderAnnTools();
@@ -2871,9 +3040,21 @@ function annPointerDown(event, pageIndex, wrap) {
 
   event.preventDefault();
   const p = annRelative(event, wrap);
+  if (ann.tool === 'note') {
+    const text = prompt('Texto de la nota:');
+    if (text && text.trim()) {
+      pushAnnHistory();
+      const it = { id: ann.nextId++, page: pageIndex, type: 'note', xr: clamp01(p.xr - 0.012), yr: clamp01(p.yr - 0.012), color: ann.color, text: text.trim() };
+      ann.items.push(it);
+      renderAnnTools();
+      renderAnnPages();
+    }
+    return;
+  }
   if (ann.tool === 'text') {
     const text = prompt('Texto a escribir:');
     if (text && text.trim()) {
+      pushAnnHistory();
       ann.items.push({ id: ann.nextId++, page: pageIndex, type: 'text', xr: p.xr, yr: p.yr, size: ann.textSize, color: ann.color, text: text.trim() });
       renderAnnPages();
     }
@@ -2883,6 +3064,7 @@ function annPointerDown(event, pageIndex, wrap) {
     const nombre = prompt('Nombre o texto del timbre:', 'Firmado por ');
     if (nombre && nombre.trim()) {
       const lines = [nombre.trim(), `Fecha: ${fechaLegible(new Date())}`, `Folio: ${generarFolio()}`];
+      pushAnnHistory();
       ann.items.push({
         id: ann.nextId++,
         page: pageIndex,
@@ -2898,10 +3080,10 @@ function annPointerDown(event, pageIndex, wrap) {
     }
     return;
   }
-  if (ann.tool === 'draw') {
-    ann.draft = { id: ann.nextId++, page: pageIndex, type: 'draw', color: ann.color, points: [[p.xr, p.yr]], wrap };
+  if (ann.tool === 'draw' || ann.tool === 'pen') {
+    ann.draft = { id: ann.nextId++, page: pageIndex, type: ann.tool, color: ann.color, thickness: ann.thickness, points: [[p.xr, p.yr]], wrap };
   } else {
-    ann.draft = { id: ann.nextId++, page: pageIndex, type: ann.tool, xr: p.xr, yr: p.yr, wr: 0, hr: 0, color: ann.color, startX: p.xr, startY: p.yr, wrap };
+    ann.draft = { id: ann.nextId++, page: pageIndex, type: ann.tool, xr: p.xr, yr: p.yr, wr: 0, hr: 0, color: ann.color, thickness: ann.thickness, startX: p.xr, startY: p.yr, wrap };
   }
   startAnnWindowDrag();
 }
@@ -2933,7 +3115,11 @@ function annPointerMove(event) {
     const dy = p.yr - ann.drag.lastY;
     ann.drag.lastX = p.xr;
     ann.drag.lastY = p.yr;
-    if (it.type === 'draw') {
+    if (!ann.drag.moved && (dx || dy)) {
+      ann.drag.moved = true;
+      ann.history.push(ann.drag.snapshot);
+    }
+    if (it.type === 'draw' || it.type === 'pen') {
       it.points = it.points.map(([x, y]) => [clamp01(x + dx), clamp01(y + dy)]);
       renderAnnItems(ann.drag.layer, it.page);
       ann.drag.node = ann.drag.layer.querySelector(`.ann-item[data-id="${it.id}"]`);
@@ -2947,7 +3133,7 @@ function annPointerMove(event) {
     }
     return;
   }
-  if (ann.draft.type === 'draw') {
+  if (ann.draft.type === 'draw' || ann.draft.type === 'pen') {
     ann.draft.points.push([p.xr, p.yr]);
   } else {
     ann.draft.xr = Math.min(ann.draft.startX, p.xr);
@@ -2962,8 +3148,9 @@ function annPointerMove(event) {
 function drawAnnDraft() {
   const layer = el.annPages.querySelector(`.ann-page[data-page="${ann.draft.page}"] .ann-layer`);
   if (!layer) return;
-  renderAnnItems(layer, ann.draft.page);
   const d = ann.draft;
+  if (d.type !== 'draw') return renderAnnItems(layer, d.page, d);
+  renderAnnItems(layer, ann.draft.page);
   const node = document.createElement('div');
   if (d.type === 'draw') {
     node.className = 'ann-item ann-draw';
@@ -2984,33 +3171,88 @@ function drawAnnDraft() {
 function annPointerUp() {
   if (ann.drag) {
     ann.drag = null;
+    renderAnnTools();
     markAnnSelected();
     return;
   }
   const d = ann.draft;
   ann.draft = null;
   if (!d) return;
-  if (d.type === 'draw') {
-    if (d.points.length > 1) ann.items.push({ id: d.id, page: d.page, type: 'draw', color: d.color, points: d.points });
-  } else if (d.wr > 0.01 && d.hr > 0.01) {
-    ann.items.push({ id: d.id, page: d.page, type: d.type, xr: d.xr, yr: d.yr, wr: d.wr, hr: d.hr, color: d.color });
+  const lineal = d.type === 'underline' || d.type === 'strike' || d.type === 'highlight';
+  if (d.type === 'draw' || d.type === 'pen') {
+    if (d.points.length > 1) {
+      pushAnnHistory();
+      const it = { id: d.id, page: d.page, type: d.type, color: d.color, points: d.points };
+      if (d.type === 'pen') it.thickness = d.thickness;
+      ann.items.push(it);
+    }
+  } else if (d.wr > 0.01 && d.hr > (lineal ? 0.004 : 0.01)) {
+    pushAnnHistory();
+    const it = { id: d.id, page: d.page, type: d.type, xr: d.xr, yr: d.yr, wr: d.wr, hr: d.hr, color: d.color };
+    if (d.type === 'rect') it.thickness = d.thickness;
+    ann.items.push(it);
   }
+  renderAnnTools();
   renderAnnPages();
 }
 
 function deleteAnnSelected() {
+  if (ann.selected == null) return;
+  pushAnnHistory();
   ann.items = ann.items.filter((i) => i.id !== ann.selected);
   ann.selected = null;
   renderAnnTools();
   renderAnnPages();
 }
 
-async function saveAnnotations() {
+function saveAnnotations() {
   if (!ann.items.length) return toast('No hay anotaciones que guardar.');
+  const doc = state.docs.find((d) => d.id === ann.doc.id);
+  chooseAction('Guardar anotaciones', [
+    ...(doc ? [{ label: 'Guardar en este documento', run: () => saveAnnotationsInPlace(doc) }] : []),
+    { label: 'Guardar como copia nueva', run: saveAnnotationsCopy },
+  ]);
+}
+
+async function saveAnnotationsInPlace(doc) {
   busy('Guardando anotaciones…');
   try {
     const edit = await import('./pdfedit.js');
-    const blob = await edit.applyAnnotations(ann.sourceBlob, ann.items);
+    const blob = await edit.applyAnnotations(ann.sourceBlob, ann.items, { author: authorName() });
+    const updated = await replaceDocPdf(doc, blob);
+    closeAnnotate();
+    renderLibrary();
+    processQueue();
+    closeViewerImages();
+    openViewer(updated);
+    toast(inCloud(doc) ? 'Anotaciones guardadas. La versión anterior queda respaldada en la nube.' : 'Anotaciones guardadas.');
+  } catch (error) {
+    toast(`No se pudo guardar: ${error.message}`);
+  } finally {
+    busy(null);
+  }
+}
+
+/** Atajos de teclado al anotar (computador). */
+function annotateKeys(event) {
+  if (el.annotate.hidden || !ann || !el.busy.hidden || document.querySelector('.action-sheet')) return;
+  if (event.target.closest?.('input, textarea')) return;
+  const mod = event.ctrlKey || event.metaKey;
+  if (mod && event.key.toLowerCase() === 'z') undoAnn();
+  else if ((event.key === 'Delete' || event.key === 'Backspace') && ann.selected != null) deleteAnnSelected();
+  else if (event.key === 'Escape' && ann.selected != null) {
+    ann.selected = null;
+    renderAnnTools();
+    markAnnSelected();
+  } else return;
+  event.preventDefault();
+}
+
+async function saveAnnotationsCopy() {
+  busy('Guardando anotaciones…');
+  try {
+    const edit = await import('./pdfedit.js');
+    const blob = await edit.applyAnnotations(ann.sourceBlob, ann.items, { author: authorName() });
     const doc = await saveNewPdf(blob, `${ann.doc.name} (anotado)`);
     closeAnnotate();
     renderLibrary();
@@ -4313,6 +4555,7 @@ function setup() {
     closeAnnotate();
   });
   el.annSave.addEventListener('click', saveAnnotations);
+  document.addEventListener('keydown', annotateKeys);
 
   // Nuevo PDF
   el.editorCancel.addEventListener('click', cancelDraft);
