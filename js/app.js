@@ -290,7 +290,7 @@ function renderLibrary() {
   );
 
   // Aviso para subir los PDF que solo están en este dispositivo
-  const localOnly = inCloud ? allDocs.filter((doc) => !doc.userId).length : 0;
+  const localOnly = inCloud ? allDocs.filter((doc) => !doc.userId && !doc.fileHandle).length : 0;
   el.uploadBanner.hidden = !localOnly;
   el.uploadBannerText.textContent =
     localOnly === 1 ? '1 PDF está solo en este dispositivo.' : `${localOnly} PDF están solo en este dispositivo.`;
@@ -436,6 +436,7 @@ function renderLibSide() {
   );
 
   nodes.push(titulo('Herramientas PDF'));
+  if (!isIOS()) nodes.push(boton({ icon: 'folder', label: 'Abrir PDF del equipo', run: openDeviceFiles }));
   nodes.push(boton({ icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() }));
   nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
@@ -589,6 +590,12 @@ function docRow(doc, showFolder) {
       </span>
     </div>`;
   li.querySelector('.name').textContent = doc.name;
+  if (doc.fileHandle) {
+    li.querySelector('.name-line').insertAdjacentHTML(
+      'beforeend',
+      doc.fileDirty ? '<span class="tag warn">Sin guardar en el equipo</span>' : '<span class="tag device">En tu equipo</span>',
+    );
+  }
   if (signedIn() && doc.estadoOcr === 'pendiente') {
     li.querySelector('.name-line').insertAdjacentHTML('beforeend', '<span class="tag warn">OCR pendiente</span>');
   }
@@ -811,6 +818,7 @@ function pickDocument(title, run) {
 function addMenu() {
   const options = [];
   if (signedIn()) options.push({ label: 'Nueva carpeta', run: newFolder });
+  if (!isIOS()) options.push({ label: 'Abrir PDF del equipo (editar y guardar ahí)', run: openDeviceFiles });
   options.push({ label: 'Importar PDF', run: () => el.pdfInput.click() });
   options.push({ label: 'Importar todo: PDF e imágenes (CamScanner)', run: importMenu });
   options.push({ label: 'Combinar PDF', run: openCombine });
@@ -1679,7 +1687,10 @@ async function replaceDocPdf(doc, pdf) {
     const { remotePath, thumbPath } = await cloud.uploadNewVersion(doc, { pdf, thumb, pageCount, textoOcr });
     Object.assign(cambios, { remotePath, thumbPath });
   }
-  return updateDoc(doc.id, cambios);
+  const updated = await updateDoc(doc.id, cambios);
+  // Abierto desde el equipo: el archivo también se actualiza.
+  if (updated.fileHandle) await saveToDeviceFile(updated, { auto: true });
+  return state.docs.find((d) => d.id === doc.id) ?? updated;
 }
 
 async function saveOrganizedInPlace(doc) {
@@ -1692,7 +1703,7 @@ async function saveOrganizedInPlace(doc) {
     processQueue();
     closeViewerImages();
     openViewer(updated);
-    toast(inCloud(doc) ? 'Cambios guardados. La versión anterior queda respaldada en la nube.' : 'Cambios guardados.');
+    toast(savedMessage(updated, 'Cambios guardados'));
   } catch (error) {
     toast(`No se pudo guardar: ${error.message}`);
   } finally {
@@ -1782,6 +1793,10 @@ function toolsMenu() {
   if (signedIn() && doc.estadoOcr === 'pendiente') {
     opciones.push({ label: 'Reconocer texto (OCR)', run: () => runOcrOn(doc) });
   }
+  if (doc.fileHandle) {
+    opciones.unshift({ label: `Guardar en el equipo («${doc.fileHandle.name}»)`, run: () => saveToDeviceFile(doc) });
+  }
+  if (!isIOS()) opciones.push({ label: 'Guardar como… (elegir carpeta del equipo)', run: () => saveDocAs(doc) });
   opciones.push(
     { label: 'Organizar páginas', run: () => openOrganize(doc) },
     { label: 'Extraer páginas', run: () => openOrganize(doc, { mode: 'extract' }) },
@@ -2678,6 +2693,202 @@ function sealsMenu() {
     { label: '＋ Crear sello dinámico', run: () => openSealEditor() },
     ...lista.map((s) => ({ label: `${s.categoria ? `${s.categoria} · ` : ''}${s.nombre}`, run: () => openSealEditor(s) })),
   ]);
+}
+
+// ---------------------------------------------------------------------------
+// Archivos del equipo: abrir un PDF de una carpeta, editarlo y guardarlo en el
+// mismo archivo (o en otra carpeta). Usa la API de acceso a archivos de Chrome y
+// Edge en computador; donde no existe, se importa y se guarda como descarga.
+// ---------------------------------------------------------------------------
+
+const canUseFileSystem = () => typeof window.showOpenFilePicker === 'function' && typeof window.showSaveFilePicker === 'function';
+const PDF_TYPES = [{ description: 'Documento PDF', accept: { 'application/pdf': ['.pdf'] } }];
+
+/** Pide (si hace falta) permiso para escribir en el archivo. Debe llamarse tras un clic. */
+async function ensureWritePermission(handle) {
+  const opts = { mode: 'readwrite' };
+  if ((await handle.queryPermission?.(opts)) === 'granted') return true;
+  return (await handle.requestPermission?.(opts)) === 'granted';
+}
+
+async function writeHandle(handle, blob) {
+  const w = await handle.createWritable();
+  await w.write(blob);
+  await w.close();
+}
+
+/** Abre uno o varios PDF del equipo. Quedan vinculados a su archivo para guardarlos ahí. */
+async function openDeviceFiles() {
+  if (!canUseFileSystem()) {
+    toast('Este navegador no permite guardar en el mismo archivo: se importará y al guardar se descargará. Usa Chrome o Edge en el computador para editar el archivo directamente.');
+    el.pdfInput.click();
+    return;
+  }
+  let handles;
+  try {
+    handles = await window.showOpenFilePicker({ id: 'agnescan-pdf', multiple: true, types: PDF_TYPES });
+  } catch (error) {
+    if (error.name !== 'AbortError') toast(`No se pudo abrir: ${error.message}`);
+    return;
+  }
+  // Permiso de escritura ahora (aún dentro del gesto), así luego se guarda sin preguntar.
+  try {
+    await ensureWritePermission(handles[0]);
+  } catch {
+    /* se volverá a pedir al guardar */
+  }
+  let pdftext = null;
+  try {
+    pdftext = await import('./pdftext.js');
+  } catch {
+    /* sin pdf.js: se abre igual */
+  }
+  const abiertos = [];
+  for (const [i, handle] of handles.entries()) {
+    busy(handles.length === 1 ? 'Abriendo PDF…' : `Abriendo ${i + 1} de ${handles.length}…`, { fraction: i / handles.length, sub: handle.name });
+    try {
+      const file = await handle.getFile();
+      // Si ya estaba abierto, se reutiliza (y se actualiza si el archivo cambió).
+      const existente = await findDocByHandle(handle);
+      if (existente) {
+        abiertos.push((await refreshFromDisk(existente, file)) ?? existente);
+        continue;
+      }
+      const leido = await readPdfFile(file, pdftext);
+      if (!leido) throw new Error('no es un PDF válido');
+      const doc = {
+        id: uid(),
+        name: sanitizeName(file.name) || 'Documento',
+        created: Date.now(),
+        size: leido.blob.size,
+        pageCount: leido.pageCount,
+        pdf: leido.blob,
+        thumb: leido.thumb,
+        previews: null,
+        origen: 'equipo',
+        textoOcr: leido.textoOcr,
+        estadoOcr: leido.textoOcr ? 'completado' : 'pendiente',
+        sync: 'local', // queda en el equipo: no se sube a la nube
+        carpetaId: null,
+        fileHandle: handle,
+        fileModified: file.lastModified,
+      };
+      await saveDoc(doc);
+      state.docs.push(doc);
+      abiertos.push(doc);
+    } catch (error) {
+      toast(`«${handle.name}»: ${error.message}`);
+    }
+  }
+  busy(null);
+  renderLibrary();
+  if (abiertos.length === 1) openViewer(abiertos[0]);
+  else if (abiertos.length) toast(`${abiertos.length} PDF abiertos. Los cambios se guardan en sus archivos.`);
+}
+
+async function findDocByHandle(handle) {
+  for (const d of state.docs) {
+    if (d.fileHandle && (await d.fileHandle.isSameEntry(handle).catch(() => false))) return d;
+  }
+  return null;
+}
+
+/** Si el archivo se modificó fuera de AgneScan, se carga la versión del disco. */
+async function refreshFromDisk(doc, file) {
+  try {
+    file ??= await doc.fileHandle.getFile();
+  } catch {
+    return null; // el archivo se movió o borró: se sigue con la copia guardada
+  }
+  if (!doc.fileModified || file.lastModified <= doc.fileModified) return null;
+  const pdftext = await import('./pdftext.js').catch(() => null);
+  const leido = await readPdfFile(file, pdftext);
+  if (!leido) return null;
+  const updated = await updateDoc(doc.id, {
+    pdf: leido.blob,
+    size: leido.blob.size,
+    pageCount: leido.pageCount,
+    thumb: leido.thumb ?? doc.thumb,
+    previews: null,
+    fileModified: file.lastModified,
+    ...(leido.textoOcr ? { textoOcr: leido.textoOcr, estadoOcr: 'completado' } : {}),
+  });
+  toast('Se cargó la versión más reciente del archivo del equipo.');
+  return updated;
+}
+
+/** Mensaje tras guardar en el mismo documento (nube, equipo o ambos). */
+function savedMessage(doc, base) {
+  if (doc.fileHandle && doc.fileDirty) return `${base} en AgneScan, pero falta guardarlos en tu equipo (menú «Más» › Guardar en el equipo).`;
+  if (doc.fileHandle) return `${base} en tu equipo: «${doc.fileHandle.name}».`;
+  if (inCloud(doc)) return `${base}. La versión anterior queda respaldada en la nube.`;
+  return `${base}.`;
+}
+
+/** Guarda el PDF del documento en su archivo del equipo (el mismo que se abrió). */
+async function saveToDeviceFile(doc, { auto = false } = {}) {
+  doc = state.docs.find((d) => d.id === doc.id) ?? doc;
+  if (!doc.fileHandle) return saveDocAs(doc);
+  try {
+    if (!(await ensureWritePermission(doc.fileHandle))) throw Object.assign(new Error('permiso'), { name: 'NotAllowedError' });
+    await writeHandle(doc.fileHandle, doc.pdf);
+    const file = await doc.fileHandle.getFile();
+    await updateDoc(doc.id, { fileModified: file.lastModified, fileDirty: false });
+    toast(`Guardado en tu equipo: «${doc.fileHandle.name}».`);
+    renderLibrary();
+    return true;
+  } catch (error) {
+    await updateDoc(doc.id, { fileDirty: true });
+    renderLibrary();
+    if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+      // Sin permiso (p. ej. otra sesión del navegador): se pide con un clic.
+      if (auto) {
+        chooseAction('¿Guardar también el archivo en tu equipo?', [
+          { label: `Guardar en «${doc.fileHandle.name}»`, run: () => saveToDeviceFile(doc) },
+          { label: 'Guardar como… (elegir carpeta)', run: () => saveDocAs(doc) },
+        ]);
+      } else toast('No se dio permiso para guardar en el archivo. Usa «Guardar como…» para elegir dónde guardarlo.');
+    } else if (error.name === 'NotFoundError') {
+      toast('El archivo original ya no está (se movió o borró). Usa «Guardar como…».');
+    } else toast(`No se pudo guardar en el equipo: ${error.message}`);
+    return false;
+  }
+}
+
+/** «Guardar como…»: elegir carpeta y nombre en el equipo. El documento queda vinculado a ese archivo. */
+async function saveDocAs(doc) {
+  doc = state.docs.find((d) => d.id === doc.id) ?? doc;
+  const nombre = `${sanitizeName(doc.name) || 'Documento'}.pdf`;
+  if (!canUseFileSystem()) {
+    await shareOrDownload(new File([doc.pdf ?? (await pdfBlobOf(doc))], nombre, { type: 'application/pdf' }));
+    return false;
+  }
+  let handle;
+  try {
+    handle = await window.showSaveFilePicker({
+      id: 'agnescan-pdf',
+      suggestedName: nombre,
+      types: PDF_TYPES,
+      ...(doc.fileHandle ? { startIn: doc.fileHandle } : {}),
+    });
+  } catch (error) {
+    if (error.name !== 'AbortError') toast(`No se pudo guardar: ${error.message}`);
+    return false;
+  }
+  try {
+    busy('Guardando en tu equipo…');
+    await writeHandle(handle, doc.pdf ?? (await pdfBlobOf(doc)));
+    const file = await handle.getFile();
+    await updateDoc(doc.id, { fileHandle: handle, fileModified: file.lastModified, fileDirty: false });
+    renderLibrary();
+    toast(`Guardado en tu equipo: «${handle.name}». Los próximos cambios se guardarán en ese archivo.`);
+    return true;
+  } catch (error) {
+    toast(`No se pudo guardar: ${error.message}`);
+    return false;
+  } finally {
+    busy(null);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3807,7 +4018,7 @@ async function saveAnnotationsInPlace(doc) {
     processQueue();
     closeViewerImages();
     openViewer(updated);
-    toast(inCloud(doc) ? 'Anotaciones guardadas. La versión anterior queda respaldada en la nube.' : 'Anotaciones guardadas.');
+    toast(savedMessage(updated, 'Anotaciones guardadas'));
   } catch (error) {
     toast(`No se pudo guardar: ${error.message}`);
   } finally {
@@ -3849,7 +4060,7 @@ async function saveAnnotationsCopy() {
 }
 
 function uploadLocalDocs() {
-  const docs = visibleDocs().filter((doc) => !doc.userId);
+  const docs = visibleDocs().filter((doc) => !doc.userId && !doc.fileHandle);
   const ok = confirm(
     `¿Subir ${docs.length === 1 ? 'el PDF' : `los ${docs.length} PDF`} de este iPhone a tu cuenta (${state.user.email})?\n\n` +
       'Quedarán en «Mis PDF» y podrás moverlos a carpetas.',
@@ -3909,6 +4120,8 @@ async function openViewer(doc) {
       busy(null);
     }
   }
+  doc = state.docs.find((d) => d.id === doc.id) ?? doc; // la versión más reciente en memoria
+  if (doc.fileHandle && !doc.fileDirty) doc = (await refreshFromDisk(doc)) ?? doc;
   state.current = doc;
   el.viewerTitle.textContent = doc.name;
   el.moveBtn.hidden = !(signedIn() && doc.userId);
