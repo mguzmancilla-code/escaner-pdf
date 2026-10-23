@@ -96,7 +96,7 @@ for (const id of [
   'organize', 'orgCancel', 'orgTitle', 'orgSave', 'orgHint', 'orgGrid', 'orgActions',
   'annotate', 'annCancel', 'annSave', 'annTools', 'annHint', 'annList', 'annPages',
   'busy', 'busyText', 'busySpinner', 'busyBar', 'busyBarFill', 'busySub', 'busyStop', 'toast',
-  'cameraInput', 'imagesInput', 'pdfInput', 'folderInput', 'mixedInput',
+  'cameraInput', 'imagesInput', 'pdfInput', 'folderInput', 'mixedInput', 'anyInput',
   'textx', 'txClose', 'txCopy', 'txHint', 'txCamera', 'txImages', 'txPaste', 'txThumbs', 'txText', 'txCount',
   'txTxt', 'txDocx', 'txClear', 'txCameraInput', 'txImagesInput',
   'compare', 'cmpClose', 'cmpMark', 'cmpA', 'cmpAName', 'cmpB', 'cmpBName', 'cmpSwap', 'cmpRun', 'cmpTabs', 'cmpResult', 'cmpInput',
@@ -436,7 +436,8 @@ function renderLibSide() {
   );
 
   nodes.push(titulo('Herramientas PDF'));
-  if (!isIOS()) nodes.push(boton({ icon: 'folder', label: 'Abrir PDF del equipo', run: () => openDeviceFiles() }));
+  if (!isIOS()) nodes.push(boton({ icon: 'folder', label: 'Abrir archivo del equipo', run: () => openDeviceFiles() }));
+  nodes.push(boton({ icon: 'docImport', label: 'Convertir archivo a PDF', run: () => el.anyInput.click() }));
   nodes.push(boton({ icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() }));
   nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
@@ -818,7 +819,8 @@ function pickDocument(title, run) {
 function addMenu() {
   const options = [];
   if (signedIn()) options.push({ label: 'Nueva carpeta', run: newFolder });
-  if (!isIOS()) options.push({ label: 'Abrir PDF del equipo (editar y guardar ahí)', run: () => openDeviceFiles() });
+  if (!isIOS()) options.push({ label: 'Abrir archivo del equipo (editar y guardar ahí)', run: () => openDeviceFiles() });
+  options.push({ label: 'Convertir archivo a PDF (Word, Excel, imagen…)', run: () => el.anyInput.click() });
   options.push({ label: 'Importar PDF', run: () => el.pdfInput.click() });
   options.push({ label: 'Importar todo: PDF e imágenes (CamScanner)', run: importMenu });
   options.push({ label: 'Combinar PDF', run: openCombine });
@@ -2728,11 +2730,19 @@ async function openDeviceFiles(recibidos = null) {
   let handles = recibidos;
   if (!handles) {
     try {
-      handles = await window.showOpenFilePicker({ id: 'agnescan-pdf', multiple: true, types: PDF_TYPES });
+      handles = await window.showOpenFilePicker({ id: 'agnescan-pdf', multiple: true, types: ANY_TYPES });
     } catch (error) {
       if (error.name !== 'AbortError') toast(`No se pudo abrir: ${error.message}`);
       return;
     }
+  }
+  // Lo que no es PDF se convierte (y se ofrece guardar el PDF junto al original).
+  const otros = handles.filter((h) => !/\.pdf$/i.test(h.name));
+  if (otros.length) {
+    const files = await Promise.all(otros.map((h) => h.getFile()));
+    await convertFilesToPdf(files, { handles: otros });
+    handles = handles.filter((h) => /\.pdf$/i.test(h.name));
+    if (!handles.length) return;
   }
   // Permiso de escritura ahora (aún dentro del gesto), así luego se guarda sin preguntar.
   try {
@@ -2796,7 +2806,7 @@ async function openDeviceFiles(recibidos = null) {
 function listenFileLaunches() {
   if (!('launchQueue' in window)) return;
   window.launchQueue.setConsumer(async (params) => {
-    const handles = (params.files ?? []).filter((h) => h.kind === 'file' && /\.pdf$/i.test(h.name));
+    const handles = (params.files ?? []).filter((h) => h.kind === 'file');
     if (!handles.length) return;
     await docsLoaded;
     openDeviceFiles(handles);
@@ -2873,7 +2883,7 @@ async function saveToDeviceFile(doc, { auto = false } = {}) {
 }
 
 /** «Guardar como…»: elegir carpeta y nombre en el equipo. El documento queda vinculado a ese archivo. */
-async function saveDocAs(doc) {
+async function saveDocAs(doc, { startIn } = {}) {
   doc = state.docs.find((d) => d.id === doc.id) ?? doc;
   const nombre = `${sanitizeName(doc.name) || 'Documento'}.pdf`;
   if (!canUseFileSystem()) {
@@ -2886,7 +2896,7 @@ async function saveDocAs(doc) {
       id: 'agnescan-pdf',
       suggestedName: nombre,
       types: PDF_TYPES,
-      ...(doc.fileHandle ? { startIn: doc.fileHandle } : {}),
+      ...(startIn || doc.fileHandle ? { startIn: startIn || doc.fileHandle } : {}),
     });
   } catch (error) {
     if (error.name !== 'AbortError') toast(`No se pudo guardar: ${error.message}`);
@@ -2905,6 +2915,125 @@ async function saveDocAs(doc) {
     return false;
   } finally {
     busy(null);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Convertir cualquier archivo a PDF: imágenes y texto en el navegador;
+// Word, Excel, PowerPoint, OpenOffice, RTF, HTML, HEIC… en la nube (CloudConvert).
+// ---------------------------------------------------------------------------
+
+const LOCAL_IMAGE_EXT = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
+const TEXT_EXT = /\.(txt|csv|tsv|md|log|json|xml)$/i;
+const MONO_EXT = /\.(csv|tsv|log|json|xml)$/i;
+const CLOUD_EXT = /\.(docx?|docm|dotx?|odt|rtf|wpd|pages|xlsx?|xlsm|xlsb|ods|numbers|pptx?|ppsx?|odp|key|html?|xps|epub|heic|heif|tiff?|svg|psd)$/i;
+const CLOUD_MAX = 12 * 1024 * 1024;
+
+/** Tipos para el selector de archivos (PDF y todo lo que se puede convertir). */
+const ANY_TYPES = [
+  {
+    description: 'PDF, Word, Excel, PowerPoint, imágenes y texto',
+    accept: {
+      'application/pdf': ['.pdf'],
+      'application/msword': ['.doc', '.dot'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'application/vnd.ms-excel': ['.xls'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-powerpoint': ['.ppt', '.pps'],
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+      'application/vnd.oasis.opendocument.text': ['.odt'],
+      'application/vnd.oasis.opendocument.spreadsheet': ['.ods'],
+      'application/vnd.oasis.opendocument.presentation': ['.odp'],
+      'application/rtf': ['.rtf'],
+      'text/plain': ['.txt', '.md', '.log'],
+      'text/csv': ['.csv'],
+      'text/html': ['.html', '.htm'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png': ['.png'],
+      'image/webp': ['.webp'],
+      'image/heic': ['.heic', '.heif'],
+      'image/tiff': ['.tif', '.tiff'],
+      'image/gif': ['.gif'],
+      'image/bmp': ['.bmp'],
+    },
+  },
+];
+const ANY_ACCEPT = [...new Set(Object.entries(ANY_TYPES[0].accept).flat(2))].join(',');
+
+const canConvert = (f) => isPdfFile(f) || LOCAL_IMAGE_EXT.test(f.name) || TEXT_EXT.test(f.name) || CLOUD_EXT.test(f.name) || f.type.startsWith('image/');
+
+/** Convierte un archivo a PDF (Blob). */
+async function anyToPdf(file) {
+  if (isPdfFile(file)) return new Blob([await file.arrayBuffer()], { type: 'application/pdf' });
+  const titulo = file.name.replace(/\.[^.]+$/, '');
+  if (TEXT_EXT.test(file.name)) {
+    const edit = await import('./pdfedit.js');
+    return edit.textToPdf(await file.text(), { title: titulo, mono: MONO_EXT.test(file.name) });
+  }
+  if (LOCAL_IMAGE_EXT.test(file.name) || (file.type.startsWith('image/') && !CLOUD_EXT.test(file.name))) {
+    return (await pdfFromImages([file], titulo)).pdf;
+  }
+  if (CLOUD_EXT.test(file.name)) {
+    // HEIC y TIFF a veces el navegador sí los abre: se intenta primero sin nube.
+    if (/\.(heic|heif|tiff?)$/i.test(file.name)) {
+      try {
+        return (await pdfFromImages([file], titulo)).pdf;
+      } catch {
+        /* se convierte en la nube */
+      }
+    }
+    if (!signedIn()) throw new Error('inicia sesión: Word, Excel y PowerPoint se convierten en la nube');
+    if (!navigator.onLine) throw new Error('necesitas conexión a internet para convertirlo');
+    if (file.size > CLOUD_MAX) throw new Error('es muy grande para convertirlo (máx. 12 MB)');
+    return cloud.convertToPdf(file);
+  }
+  throw new Error('este formato no se puede convertir a PDF');
+}
+
+/**
+ * Convierte uno o varios archivos a PDF y los guarda en la biblioteca.
+ * @param {File[]} files
+ * @param {{ handles?: FileSystemFileHandle[] }} opciones  handles: archivos abiertos desde el equipo (para guardar el PDF junto al original)
+ */
+async function convertFilesToPdf(files, { handles = [] } = {}) {
+  const creados = [];
+  const errores = [];
+  for (const [i, file] of files.entries()) {
+    const nube = CLOUD_EXT.test(file.name) && !/\.(heic|heif|tiff?)$/i.test(file.name);
+    busy(nube ? 'Convirtiendo a PDF en la nube…' : 'Convirtiendo a PDF…', { fraction: i / files.length, sub: file.name });
+    try {
+      const pdf = await anyToPdf(file);
+      const doc = await saveNewPdf(pdf, file.name.replace(/\.[^.]+$/, ''), { carpetaId: state.folderId });
+      creados.push({ doc, handle: handles[i] });
+    } catch (error) {
+      errores.push(`«${file.name}»: ${error.message}`);
+    }
+  }
+  busy(null);
+  renderLibrary();
+  processQueue();
+  if (errores.length) {
+    const lista = errores.slice(0, 10).join('\n');
+    setTimeout(() => alert(`${errores.length === 1 ? 'No se pudo convertir 1 archivo' : `No se pudieron convertir ${errores.length} archivos`}:\n\n${lista}`), 300);
+  }
+  if (!creados.length) return;
+  if (creados.length === 1) await openViewer(creados[0].doc);
+  toast(creados.length === 1 ? 'Convertido a PDF.' : `${creados.length} archivos convertidos a PDF.`);
+  // Abierto desde el equipo: se ofrece guardar el PDF en la misma carpeta del original.
+  const conCarpeta = creados.filter((c) => c.handle);
+  if (conCarpeta.length && canUseFileSystem()) {
+    chooseAction(
+      conCarpeta.length === 1 ? '¿Guardar el PDF en la carpeta del archivo original?' : '¿Guardar los PDF en la carpeta de los originales?',
+      [
+        {
+          label: conCarpeta.length === 1 ? 'Guardar en la misma carpeta…' : 'Guardar cada uno…',
+          run: async () => {
+            for (const c of conCarpeta) await saveDocAs(c.doc, { startIn: c.handle });
+          },
+        },
+        { label: 'Solo dejarlo en AgneScan', run: () => {} },
+      ],
+    );
   }
 }
 
@@ -5229,11 +5358,13 @@ function setup() {
       (entries.length ? itemsFromEntries(entries) : Promise.resolve(itemsFromInput(files)))
         .then(importBatch)
         .catch((error) => toast(`No se pudo leer lo soltado: ${error.message}`));
+    } else if (files.some((f) => !isPdfFile(f) && !isImageFile(f) && canConvert(f))) {
+      convertFilesToPdf(files.filter(canConvert));
     } else if (pdfs.length) importPdfs(pdfs);
     else if (imagenes.length) {
       newDraft();
       addFromLibrary(imagenes);
-    } else toast('Solo se pueden soltar PDF o imágenes.');
+    } else toast('Ese tipo de archivo no se puede convertir a PDF.');
   });
 
   // Entradas de archivo
@@ -5273,6 +5404,12 @@ function setup() {
     }
   });
 
+  el.anyInput.accept = ANY_ACCEPT;
+  el.anyInput.addEventListener('change', () => {
+    const files = [...el.anyInput.files];
+    el.anyInput.value = '';
+    if (files.length) convertFilesToPdf(files);
+  });
   for (const input of [el.folderInput, el.mixedInput]) {
     input.addEventListener('change', () => {
       const items = itemsFromInput(input.files);

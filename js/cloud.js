@@ -334,3 +334,43 @@ export async function downloadFile(path) {
   check(error, 'No se pudo descargar el archivo');
   return data;
 }
+
+/** Convierte un documento (Word, Excel, PowerPoint, RTF, HTML, HEIC…) a PDF en la nube. */
+export async function convertToPdf(file) {
+  requireUser();
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) throw new Error('Inicia sesión para convertir en la nube.');
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binario = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binario += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  let res;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/Convertir`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modo: 'a-pdf', nombre: file.name, archivoBase64: btoa(binario) }),
+    });
+  } catch {
+    throw new Error('Sin conexión con el servidor de conversión.');
+  }
+  if (!res.ok) {
+    let msg = `Error ${res.status}`;
+    if (res.status === 404) msg = 'La función de conversión no está publicada todavía.';
+    else {
+      try {
+        msg = (await res.json()).error || msg;
+      } catch {
+        /* sin cuerpo JSON */
+      }
+    }
+    // Función antigua (sin modo «a-pdf»): hay que volver a publicarla.
+    if (/Formato no soportado|Falta el PDF/.test(msg)) msg = 'Falta actualizar la función «Convertir» en Supabase para convertir a PDF.';
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const cabecera = new TextDecoder('latin1').decode(new Uint8Array(await blob.slice(0, 4).arrayBuffer()));
+  if (cabecera !== '%PDF') throw new Error('La conversión no devolvió un PDF válido.');
+  return new Blob([blob], { type: 'application/pdf' });
+}
+

@@ -1,5 +1,6 @@
 // Edge Function: convierte un PDF a Word/Excel/PowerPoint con alta fidelidad
-// usando CloudConvert. La API key vive solo en el secreto CLOUDCONVERT_API_KEY
+// usando CloudConvert, y también al revés: Word, Excel, PowerPoint, OpenOffice,
+// RTF, HTML, iWork o imágenes HEIC/TIFF → PDF (modo «a-pdf»). La API key vive solo en el secreto CLOUDCONVERT_API_KEY
 // (nunca sale al navegador). El usuario debe estar autenticado.
 //
 // Despliegue (desde el panel de Supabase, sin CLI):
@@ -12,6 +13,15 @@ const FORMATOS: Record<string, string> = {
   xlsx: 'xlsx',
   pptx: 'pptx',
 };
+
+// Formatos de entrada aceptados para convertir a PDF.
+const A_PDF = new Set([
+  'doc', 'docx', 'docm', 'dot', 'dotx', 'odt', 'rtf', 'wpd', 'pages',
+  'xls', 'xlsx', 'xlsm', 'xlsb', 'ods', 'csv', 'numbers',
+  'ppt', 'pptx', 'pps', 'ppsx', 'odp', 'key',
+  'html', 'htm', 'txt', 'md', 'xps', 'epub',
+  'heic', 'heif', 'tif', 'tiff', 'svg', 'psd',
+]);
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -34,15 +44,20 @@ Deno.serve(async (req) => {
   if (!apiKey) return json({ error: 'Falta configurar CLOUDCONVERT_API_KEY en la función.' }, 500);
 
   // 2) Leer el PDF y el formato destino.
-  let body: { pdfBase64?: string; formato?: string; nombre?: string };
+  let body: { pdfBase64?: string; formato?: string; nombre?: string; modo?: string; archivoBase64?: string };
   try {
     body = await req.json();
   } catch {
     return json({ error: 'Cuerpo inválido.' }, 400);
   }
-  const salida = FORMATOS[body.formato ?? ''];
+  // Modo «a-pdf»: cualquier documento → PDF.
+  const aPdf = body.modo === 'a-pdf';
+  const entrada = aPdf ? (body.nombre ?? '').split('.').pop()?.toLowerCase() ?? '' : 'pdf';
+  if (aPdf && !A_PDF.has(entrada)) return json({ error: `No se puede convertir archivos .${entrada} a PDF.` }, 400);
+  if (aPdf && !body.archivoBase64) return json({ error: 'Falta el archivo.' }, 400);
+  const salida = aPdf ? 'pdf' : FORMATOS[body.formato ?? ''];
   if (!salida) return json({ error: 'Formato no soportado.' }, 400);
-  if (!body.pdfBase64) return json({ error: 'Falta el PDF.' }, 400);
+  if (!aPdf && !body.pdfBase64) return json({ error: 'Falta el PDF.' }, 400);
 
   const cc = (path: string, init?: RequestInit) =>
     fetch(`https://api.cloudconvert.com/v2${path}`, {
@@ -55,6 +70,7 @@ Deno.serve(async (req) => {
     // defecto puede fallar con algunos PDF; se eligen los alternativos primero).
     let engines: string[] = [];
     try {
+      if (aPdf) throw new Error('a PDF: motor por defecto');
       const fRes = await cc(`/convert/formats?filter[input_format]=pdf&filter[output_format]=${salida}`);
       engines = ((await fRes.json()).data ?? []).map((f: any) => f.engine).filter(Boolean);
     } catch {
@@ -68,7 +84,9 @@ Deno.serve(async (req) => {
       method: 'POST',
       body: JSON.stringify({
         tasks: {
-          'import-1': { operation: 'import/base64', file: body.pdfBase64, filename: 'entrada.pdf' },
+          'import-1': aPdf
+            ? { operation: 'import/base64', file: body.archivoBase64, filename: `entrada.${entrada}` }
+            : { operation: 'import/base64', file: body.pdfBase64, filename: 'entrada.pdf' },
           'convert-1': convertTask,
           'export-1': { operation: 'export/url', input: 'convert-1' },
         },
@@ -99,7 +117,7 @@ Deno.serve(async (req) => {
         return json({ error: `CloudConvert → ${errores.join(' || ') || 'conversión fallida'}${motores}` }, 502);
       }
     }
-    if (!url) return json({ error: 'La conversión tardó demasiado. Intenta con un PDF más corto.' }, 504);
+    if (!url) return json({ error: `La conversión tardó demasiado. Intenta con un ${aPdf ? 'archivo' : 'PDF'} más corto.` }, 504);
 
     // 5) Descargar el resultado y devolverlo al navegador.
     const archivo = await fetch(url);

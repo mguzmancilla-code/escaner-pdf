@@ -481,3 +481,56 @@ async function sealXObject(PDFLib, doc, s, lineas, cache) {
   cache.set(clave, emb);
   return emb;
 }
+
+/**
+ * Convierte texto plano en un PDF A4 (con saltos de línea y de página).
+ * mono: letra de ancho fijo (para CSV, registros o código, así se alinean columnas).
+ */
+export async function textToPdf(texto, { title = '', mono = false } = {}) {
+  const PDFLib = await pdflib();
+  const doc = await PDFLib.PDFDocument.create();
+  doc.setTitle(title);
+  doc.setProducer('AgneScan');
+  const font = await doc.embedFont(mono ? PDFLib.StandardFonts.Courier : PDFLib.StandardFonts.Helvetica);
+  const size = mono ? 9 : 11;
+  const alto = size * 1.4;
+  const [W, H] = [595.28, 841.89];
+  const margen = 50;
+  const ancho = W - 2 * margen;
+  // Divide un párrafo en renglones que quepan en el ancho de la página.
+  const renglones = [];
+  for (const parrafo of String(texto).replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n')) {
+    const limpio = winAnsi(parrafo);
+    if (!limpio.trim()) {
+      renglones.push('');
+      continue;
+    }
+    let linea = '';
+    for (const palabra of limpio.split(/(\s+)/)) {
+      const prueba = linea + palabra;
+      if (font.widthOfTextAtSize(prueba, size) <= ancho) {
+        linea = prueba;
+        continue;
+      }
+      if (linea.trim()) renglones.push(linea.trimEnd());
+      // Palabras más largas que el renglón (p. ej. URL): se cortan.
+      let resto = palabra.trimStart();
+      while (font.widthOfTextAtSize(resto, size) > ancho) {
+        let n = resto.length;
+        while (n > 1 && font.widthOfTextAtSize(resto.slice(0, n), size) > ancho) n--;
+        renglones.push(resto.slice(0, n));
+        resto = resto.slice(n);
+      }
+      linea = resto;
+    }
+    renglones.push(linea.trimEnd());
+  }
+  const porPagina = Math.floor((H - 2 * margen) / alto);
+  for (let i = 0; i < Math.max(1, renglones.length); i += porPagina) {
+    const page = doc.addPage([W, H]);
+    renglones.slice(i, i + porPagina).forEach((r, k) => {
+      if (r) page.drawText(r, { x: margen, y: H - margen - size - k * alto, size, font });
+    });
+  }
+  return asBlob(await doc.save({ useObjectStreams: false }));
+}
