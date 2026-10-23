@@ -2718,18 +2718,20 @@ async function writeHandle(handle, blob) {
 }
 
 /** Abre uno o varios PDF del equipo. Quedan vinculados a su archivo para guardarlos ahí. */
-async function openDeviceFiles() {
-  if (!canUseFileSystem()) {
+async function openDeviceFiles(recibidos = null) {
+  if (!recibidos && !canUseFileSystem()) {
     toast('Este navegador no permite guardar en el mismo archivo: se importará y al guardar se descargará. Usa Chrome o Edge en el computador para editar el archivo directamente.');
     el.pdfInput.click();
     return;
   }
-  let handles;
-  try {
-    handles = await window.showOpenFilePicker({ id: 'agnescan-pdf', multiple: true, types: PDF_TYPES });
-  } catch (error) {
-    if (error.name !== 'AbortError') toast(`No se pudo abrir: ${error.message}`);
-    return;
+  let handles = recibidos;
+  if (!handles) {
+    try {
+      handles = await window.showOpenFilePicker({ id: 'agnescan-pdf', multiple: true, types: PDF_TYPES });
+    } catch (error) {
+      if (error.name !== 'AbortError') toast(`No se pudo abrir: ${error.message}`);
+      return;
+    }
   }
   // Permiso de escritura ahora (aún dentro del gesto), así luego se guarda sin preguntar.
   try {
@@ -2784,6 +2786,20 @@ async function openDeviceFiles() {
   renderLibrary();
   if (abiertos.length === 1) openViewer(abiertos[0]);
   else if (abiertos.length) toast(`${abiertos.length} PDF abiertos. Los cambios se guardan en sus archivos.`);
+}
+
+/**
+ * AgneScan instalada como aplicación puede ser el programa para abrir PDF en
+ * Windows («Abrir con» / predeterminada): el archivo llega por launchQueue.
+ */
+function listenFileLaunches() {
+  if (!('launchQueue' in window)) return;
+  window.launchQueue.setConsumer(async (params) => {
+    const handles = (params.files ?? []).filter((h) => h.kind === 'file' && /\.pdf$/i.test(h.name));
+    if (!handles.length) return;
+    await docsLoaded;
+    openDeviceFiles(handles);
+  });
 }
 
 async function findDocByHandle(handle) {
@@ -5655,6 +5671,7 @@ async function setupAccount() {
 
 async function start() {
   setup();
+  listenFileLaunches(); // PDF abiertos desde Windows con AgneScan instalada
   docsLoaded = listDocs()
     .then((docs) => (state.docs = docs))
     .catch((error) => toast(`No se pudo abrir el almacenamiento: ${error.message}`));
