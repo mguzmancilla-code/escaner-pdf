@@ -436,7 +436,7 @@ function renderLibSide() {
   );
 
   nodes.push(titulo('Herramientas PDF'));
-  if (!isIOS()) nodes.push(boton({ icon: 'folder', label: 'Abrir PDF del equipo', run: openDeviceFiles }));
+  if (!isIOS()) nodes.push(boton({ icon: 'folder', label: 'Abrir PDF del equipo', run: () => openDeviceFiles() }));
   nodes.push(boton({ icon: 'docImport', label: 'Importar PDF', run: () => el.pdfInput.click() }));
   nodes.push(boton({ icon: 'files', label: 'Importar todo (CamScanner)', run: importMenu }));
   nodes.push(boton({ icon: 'combine', label: 'Combinar PDF', run: openCombine }));
@@ -818,7 +818,7 @@ function pickDocument(title, run) {
 function addMenu() {
   const options = [];
   if (signedIn()) options.push({ label: 'Nueva carpeta', run: newFolder });
-  if (!isIOS()) options.push({ label: 'Abrir PDF del equipo (editar y guardar ahí)', run: openDeviceFiles });
+  if (!isIOS()) options.push({ label: 'Abrir PDF del equipo (editar y guardar ahí)', run: () => openDeviceFiles() });
   options.push({ label: 'Importar PDF', run: () => el.pdfInput.click() });
   options.push({ label: 'Importar todo: PDF e imágenes (CamScanner)', run: importMenu });
   options.push({ label: 'Combinar PDF', run: openCombine });
@@ -2719,6 +2719,7 @@ async function writeHandle(handle, blob) {
 
 /** Abre uno o varios PDF del equipo. Quedan vinculados a su archivo para guardarlos ahí. */
 async function openDeviceFiles(recibidos = null) {
+  if (!Array.isArray(recibidos)) recibidos = null; // p. ej. si llega el evento del clic
   if (!recibidos && !canUseFileSystem()) {
     toast('Este navegador no permite guardar en el mismo archivo: se importará y al guardar se descargará. Usa Chrome o Edge en el computador para editar el archivo directamente.');
     el.pdfInput.click();
