@@ -81,7 +81,7 @@ const icon = (name) =>
 const $ = (id) => document.getElementById(id);
 const el = {};
 for (const id of [
-  'library', 'libraryTitle', 'libSide', 'search', 'crumbs', 'uploadBanner', 'uploadBannerText', 'uploadBannerBtn',
+  'library', 'libraryTitle', 'libSide', 'mobileViews', 'search', 'crumbs', 'uploadBanner', 'uploadBannerText', 'uploadBannerBtn',
   'folderList', 'docList', 'emptyState', 'emptyTitle', 'emptyText', 'scanBtn', 'imagesBtn', 'importPdfBtn',
   'cloudBadge', 'storageBox', 'profileBtn', 'newFolderTop', 'libHeading', 'libCount', 'folderHead', 'folderHeadCount',
   'docHead', 'docHeadTitle', 'docHeadCount', 'dropZone', 'favHead', 'favHeadCount', 'favList', 'favBtn',
@@ -242,7 +242,8 @@ function renderLibrary() {
   const searching = Boolean(query);
   const recent = state.view === 'recent' && !searching;
   const fav = state.view === 'fav' && !searching;
-  const flat = recent || fav; // vistas sin carpetas: todos los documentos juntos
+  const todos = state.view === 'todos' && !searching;
+  const flat = recent || fav || todos; // vistas sin carpetas: todos los documentos juntos
   const folderId = inCloud && !flat ? state.folderId : null;
   const allDocs = visibleDocs();
   const favoritos = allDocs.filter((doc) => doc.favorito).sort((a, b) => a.name.localeCompare(b.name, 'es'));
@@ -252,10 +253,10 @@ function renderLibrary() {
     : allDocs
         .filter((doc) => {
           if (searching) return doc.name.toLowerCase().includes(query);
-          if (recent || !inCloud) return true;
+          if (recent || todos || !inCloud) return true;
           return (doc.carpetaId ?? null) === folderId;
         })
-        .sort((a, b) => b.created - a.created);
+        .sort(todos ? (a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }) : (a, b) => b.created - a.created);
   const folders = !inCloud || flat
     ? []
     : state.folders
@@ -264,10 +265,16 @@ function renderLibrary() {
 
   // Títulos y ruta de carpetas
   const path = inCloud && !flat ? folderPath(folderId) : [];
-  el.libraryTitle.textContent = recent ? 'Recientes' : fav ? 'Favoritos' : path.at(-1)?.nombre ?? 'Mis PDF';
+  el.libraryTitle.textContent = recent ? 'Recientes' : fav ? 'Favoritos' : todos ? 'Todos' : path.at(-1)?.nombre ?? 'Mis PDF';
+  // Pestañas del teléfono (en computador está la barra lateral).
+  el.mobileViews.querySelectorAll('button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.view === state.view),
+  );
   el.libHeading.textContent = searching
     ? 'Resultados de búsqueda'
-    : recent
+    : todos
+      ? 'Todos los documentos'
+      : recent
       ? 'Documentos recientes'
       : fav
         ? 'Favoritos'
@@ -312,7 +319,9 @@ function renderLibrary() {
       ? 'Por fecha'
       : fav
         ? 'Documentos importantes'
-        : 'Archivos';
+        : todos
+          ? 'De la A a la Z'
+          : 'Archivos';
   el.docHeadCount.textContent = docs.length === 1 ? '1 archivo' : `${docs.length} archivos`;
   el.docList.replaceChildren(...docs.map((doc) => docRow(doc, (searching || flat) && inCloud)));
 
@@ -5322,6 +5331,15 @@ function setup() {
   });
   el.importPdfBtn.addEventListener('click', addMenu);
   el.uploadBannerBtn.addEventListener('click', uploadLocalDocs);
+  el.mobileViews.addEventListener('click', (event) => {
+    const view = event.target.closest('button')?.dataset.view;
+    if (!view) return;
+    state.view = view;
+    if (view === 'all') state.folderId = null;
+    el.search.value = '';
+    renderLibrary();
+    el.library.querySelector('.scroll').scrollTop = 0;
+  });
   el.profileBtn.addEventListener('click', () => $('accountBtn').click());
   el.newFolderTop.addEventListener('click', newFolder);
   el.favBtn.addEventListener('click', () => state.current && toggleFavorite(state.current));
